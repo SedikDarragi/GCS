@@ -871,7 +871,8 @@ class MainApp (ctk .CTkToplevel ):
                     nom TEXT NOT NULL,
                     email TEXT,
                     telephone TEXT,
-                    adresse TEXT
+                    adresse TEXT,
+                    matricule_fiscale TEXT
                 )
                 """
             )
@@ -945,11 +946,12 @@ class MainApp (ctk .CTkToplevel ):
             "ALTER TABLE document_lignes ADD COLUMN total_ht REAL NOT NULL DEFAULT 0",
             "ALTER TABLE document_lignes ADD COLUMN total_tva REAL NOT NULL DEFAULT 0",
             "ALTER TABLE document_lignes ADD COLUMN total_ttc REAL NOT NULL DEFAULT 0",
+            "ALTER TABLE clients ADD COLUMN matricule_fiscale TEXT",
             ]:
                 try :
                     cursor .execute (ddl )
                 except sqlite3 .OperationalError :
-                    pass 
+                    pass
 
             cursor .execute (
             """
@@ -4837,7 +4839,7 @@ class MainApp (ctk .CTkToplevel ):
 
         self ._update_client_search_suggestions ()
 
-        columns =("ID","Nom","Email","Téléphone","Adresse")
+        columns =("ID","Nom","Email","Téléphone","Adresse","Matricule fiscale")
         self .clients_tree =ttk .Treeview (
         frame ,columns =columns ,show ="headings",selectmode ="browse"
         )
@@ -4847,12 +4849,14 @@ class MainApp (ctk .CTkToplevel ):
         self .clients_tree .heading ("Email",text ="Email")
         self .clients_tree .heading ("Téléphone",text ="Téléphone")
         self .clients_tree .heading ("Adresse",text ="Adresse")
+        self .clients_tree .heading ("Matricule fiscale",text ="Matricule fiscale")
 
         self .clients_tree .column ("ID",width =60 ,anchor ="center")
         self .clients_tree .column ("Nom",width =180 ,anchor ="w")
         self .clients_tree .column ("Email",width =220 ,anchor ="w")
         self .clients_tree .column ("Téléphone",width =140 ,anchor ="center")
         self .clients_tree .column ("Adresse",width =260 ,anchor ="w")
+        self .clients_tree .column ("Matricule fiscale",width =150 ,anchor ="w")
 
         scrollbar =ttk .Scrollbar (
         frame ,orient ="vertical",command =self .clients_tree .yview 
@@ -4899,7 +4903,7 @@ class MainApp (ctk .CTkToplevel ):
                     tel =parts [2 ]if len (parts )>2 else ""
                     cursor .execute (
                     """
-                        SELECT id, nom, email, telephone, adresse
+                        SELECT id, nom, email, telephone, adresse, matricule_fiscale
                         FROM clients
                         WHERE nom LIKE ? OR email LIKE ? OR telephone LIKE ?
                         ORDER BY nom
@@ -4909,7 +4913,7 @@ class MainApp (ctk .CTkToplevel ):
                 else :
                     cursor .execute (
                     """
-                        SELECT id, nom, email, telephone, adresse
+                        SELECT id, nom, email, telephone, adresse, matricule_fiscale
                         FROM clients
                         WHERE nom LIKE ? OR email LIKE ? OR telephone LIKE ?
                         ORDER BY nom
@@ -4918,7 +4922,7 @@ class MainApp (ctk .CTkToplevel ):
                     )
             else :
                 cursor .execute (
-                "SELECT id, nom, email, telephone, adresse FROM clients ORDER BY nom"
+                "SELECT id, nom, email, telephone, adresse, matricule_fiscale FROM clients ORDER BY nom"
                 )
 
             for row in cursor .fetchall ():
@@ -4931,6 +4935,7 @@ class MainApp (ctk .CTkToplevel ):
                 row [2 ]or "",
                 row [3 ]or "",
                 row [4 ]or "",
+                row [5 ]or "",
                 ),
                 )
         finally :
@@ -4963,13 +4968,14 @@ class MainApp (ctk .CTkToplevel ):
         email_value =""
         tel_value =""
         addr_value =""
+        matricule_fiscale_value =""
 
         if client_id :
             conn =sqlite3 .connect (self .db_path )
             cursor =conn .cursor ()
             try :
                 cursor .execute (
-                "SELECT nom, email, telephone, adresse FROM clients WHERE id = ?",
+                "SELECT nom, email, telephone, adresse, matricule_fiscale FROM clients WHERE id = ?",
                 (client_id ,),
                 )
                 row =cursor .fetchone ()
@@ -4978,6 +4984,7 @@ class MainApp (ctk .CTkToplevel ):
                     email_value =row [1 ]or ""
                     tel_value =row [2 ]or ""
                     addr_value =row [3 ]or ""
+                    matricule_fiscale_value =row [4 ]or ""
             finally :
                 conn .close ()
 
@@ -5047,6 +5054,16 @@ class MainApp (ctk .CTkToplevel ):
         addr_entry =ctk .CTkEntry (left ,width =510 )
         addr_entry .insert (0 ,addr_value )
         addr_entry .grid (row =5 ,column =0 ,columnspan =2 ,sticky ="w")
+
+
+        ctk .CTkLabel (left ,text ="Matricule fiscale",font =self .ui ["font_h2"]).grid (
+        row =6 ,column =0 ,sticky ="w"
+        )
+
+
+        matricule_fiscale_entry =ctk .CTkEntry (left ,width =510 )
+        matricule_fiscale_entry .insert (0 ,matricule_fiscale_value )
+        matricule_fiscale_entry .grid (row =7 ,column =0 ,columnspan =2 ,sticky ="w")
 
 
         statut_label =ctk .CTkLabel (
@@ -5145,6 +5162,7 @@ class MainApp (ctk .CTkToplevel ):
             email =email_entry .get ().strip ()
             telephone =tel_entry .get ().strip ()
             adresse =addr_entry .get ().strip ()
+            matricule_fiscale =matricule_fiscale_entry .get ().strip ()
 
             if not nom :
                 messagebox .showerror ("Erreur","Le nom est obligatoire")
@@ -5155,13 +5173,13 @@ class MainApp (ctk .CTkToplevel ):
             try :
                 if client_id :
                     cursor .execute (
-                    "UPDATE clients SET nom=?, email=?, telephone=?, adresse=? WHERE id=?",
-                    (nom ,email ,telephone ,adresse ,client_id ),
+                    "UPDATE clients SET nom=?, email=?, telephone=?, adresse=?, matricule_fiscale=? WHERE id=?",
+                    (nom ,email ,telephone ,adresse ,matricule_fiscale ,client_id ),
                     )
                 else :
                     cursor .execute (
-                    "INSERT INTO clients (nom, email, telephone, adresse) VALUES (?, ?, ?, ?)",
-                    (nom ,email ,telephone ,adresse ),
+                    "INSERT INTO clients (nom, email, telephone, adresse, matricule_fiscale) VALUES (?, ?, ?, ?, ?)",
+                    (nom ,email ,telephone ,adresse ,matricule_fiscale ),
                     )
                 conn .commit ()
             finally :
