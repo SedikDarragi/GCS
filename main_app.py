@@ -830,11 +830,39 @@ class MainApp(ctk.CTkToplevel):
             ):
                 return
 
-            shutil.copyfile(src, self.db_path)
-            messagebox.showinfo(
+            backup_path = None
+            choice = messagebox.askyesnocancel(
                 "Restaurer",
-                "Restauration effectuée. Redémarrez l'application pour recharger la base.",
+                "Voulez-vous créer une sauvegarde de la base actuelle avant la restauration ?\n\n"
+                "Oui = sauvegarder puis restaurer, Non = restaurer sans sauvegarde, Annuler = annuler.",
             )
+            if choice is None:
+                return
+
+            if choice is True:
+                path = filedialog.asksaveasfilename(
+                    defaultextension=".db",
+                    filetypes=[("SQLite DB", "*.db"), ("All files", "*.*")],
+                    initialfile=f"{os.path.basename(self.db_path)}.backup",
+                )
+                if not path:
+                    return
+                try:
+                    shutil.copyfile(self.db_path, path)
+                    backup_path = path
+                except Exception as e:
+                    messagebox.showerror(
+                        "Sauvegarde", f"Échec de la sauvegarde: {e}"
+                    )
+                    return
+
+            shutil.copyfile(src, self.db_path)
+            msg = (
+                "Restauration effectuée. Redémarrez l'application pour recharger la base."
+            )
+            if backup_path:
+                msg += f"\nUne sauvegarde de la base précédente a été créée: {backup_path}"
+            messagebox.showinfo("Restaurer", msg)
         except Exception as e:
             messagebox.showerror("Restaurer", f"Échec de la restauration: {e}")
 
