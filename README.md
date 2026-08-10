@@ -10,6 +10,7 @@ A comprehensive commercial management application built with Python and customtk
 - **Documents Management**: Create and manage quotes (Devis), delivery notes (BL), invoices (Factures), and receipts (Réception)
 - **Payments Tracking**: Monitor client payments and outstanding amounts
 - **Real-time Updates**: Automatic refresh of client balances when documents or payments are modified
+- **Secure Authentication**: Passwords stored with PBKDF2-HMAC-SHA256 hashing (random salt, 600,000 iterations)
 
 ### Document Features
 - Click-to-sort tables with visual indicators (▲/▼)
@@ -54,8 +55,8 @@ python main.py
 ## Usage
 
 ### First Launch
-1. The application will create a database automatically
-2. Login with default credentials (or create your first user)
+1. The application will create a database automatically in the application directory
+2. Login with the default admin account (`admin` / `admin123`) or create your first user
 3. Start adding clients, articles, and documents
 
 ### Navigation
@@ -71,6 +72,8 @@ python main.py
 - Press Enter to search
 - Press Escape to close dialogs
 
+> **Security note**: The default admin credentials are `admin` / `admin123` — use them only on first launch and change the password before real deployment.
+
 ## Project Structure
 
 ```
@@ -82,6 +85,7 @@ GCS/
 ├── .gitignore          # Git ignore rules
 ├── assets/
 │   └── logo.png        # Application logo
+├── tests/              # Automated tests (pytest)
 └── commercial.db       # SQLite database (created on first run)
 ```
 
@@ -90,6 +94,14 @@ GCS/
 - **customtkinter** >= 5.2.0 - Modern UI components
 - **pillow** >= 10.0.0 - Image processing
 - **reportlab** >= 4.0.0 - PDF generation
+- **pytest** (development only) - Test framework
+
+## Security
+
+- Passwords are hashed with **PBKDF2-HMAC-SHA256** (random 16-byte salt, 600,000 iterations) before being stored
+- Existing plaintext passwords are automatically migrated to hashes on the next successful login
+- The database file (`commercial.db`) is always stored in the application directory, regardless of the working directory it is launched from
+- Destructive administrative actions (e.g. database wipe, restore) require re-entering your password and offer a backup of the current database
 
 ## Development
 
@@ -99,6 +111,15 @@ The application follows a modular structure:
 - **Business Logic**: Document calculations, payment processing
 - **Data Layer**: SQLite database operations
 - **Export Layer**: HTML and PDF generation
+
+### Testing
+Run the test suite with:
+
+```bash
+python -m pytest tests
+```
+
+Tests cover password hashing, database schema initialization, document numbering sequences, and database path resolution. They run headless (no GUI required).
 
 ### Key Features Implementation
 - **Sorting**: Custom sorting functions with visual feedback
