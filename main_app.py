@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
+from main import verify_password
 
 try:
     from reportlab.lib import colors
@@ -569,13 +570,27 @@ class MainApp(ctk.CTkToplevel):
                     from tkinter import simpledialog
                     password = simpledialog.askstring(
                         "Confirmation mot de passe",
-                        "Entrez le mot de passe pour continuer:",
+                        "Entrez votre mot de passe pour continuer:",
                         show="*"
                     )
-                    
-                    if password != "12345":
-                        if password:  # Only show error if user entered something
-                            messagebox.showerror("Mot de passe incorrect", "Le mot de passe est incorrect.")
+                    if not password:
+                        return
+
+                    try:
+                        conn = sqlite3.connect(self.db_path)
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT password FROM users WHERE id = ?",
+                            (self.user["id"],),
+                        )
+                        row = cur.fetchone()
+                        conn.close()
+                    except Exception:
+                        row = None
+
+                    stored = row[0] if row else None
+                    if not stored or not verify_password(password, stored):
+                        messagebox.showerror("Mot de passe incorrect", "Le mot de passe est incorrect.")
                         return
                     
                     if not messagebox.askokcancel(

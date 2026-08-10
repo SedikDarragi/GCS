@@ -1,10 +1,51 @@
+import hashlib 
 import os 
+import secrets 
 import sqlite3 
 import webbrowser 
 from tkinter import messagebox 
 
 import customtkinter as ctk 
 from PIL import Image ,ImageTk 
+
+
+_PBKDF2_ALGO ="pbkdf2"
+_PBKDF2_ITERATIONS =600000
+
+
+def hash_password (password ):
+    salt =secrets .token_bytes (16 )
+    dk =hashlib .pbkdf2_hmac (
+    "sha256",password .encode ("utf-8"),salt ,_PBKDF2_ITERATIONS
+    )
+    return "{}${}${}${}".format (
+    _PBKDF2_ALGO ,_PBKDF2_ITERATIONS ,salt .hex (),dk .hex ()
+    )
+
+
+def verify_password (password ,stored ):
+    if not isinstance (stored ,str ) or not stored :
+        return False
+
+    if not stored .startswith (_PBKDF2_ALGO +"$"):
+        return secrets .compare_digest (password ,stored )
+
+    try :
+        algo ,iterations ,salt_hex ,hash_hex =stored .split ("$",3 )
+        if algo !=_PBKDF2_ALGO :
+            return False
+        salt =bytes .fromhex (salt_hex )
+        expected =bytes .fromhex (hash_hex )
+        dk =hashlib .pbkdf2_hmac (
+        "sha256",password .encode ("utf-8"),salt ,int (iterations )
+        )
+        return secrets .compare_digest (dk ,expected )
+    except Exception :
+        return False
+
+
+def is_password_hashed (stored ):
+    return isinstance (stored ,str ) and stored .startswith (_PBKDF2_ALGO +"$")
 
 
 class LoginWindow (ctk .CTk ):
@@ -165,7 +206,7 @@ class LoginWindow (ctk .CTk ):
                 INSERT INTO users (username, password, email, full_name, is_admin)
                 VALUES (?, ?, ?, ?, ?)
             """,
-            ("admin","admin123","admin@example.com","Administrateur",1 ),
+            ("admin",hash_password ("admin123"),"admin@example.com","Administrateur",1 ),
             )
             conn .commit ()
 
@@ -178,35 +219,41 @@ class LoginWindow (ctk .CTk ):
 
             if not username or not password :
                 messagebox .showerror ("Erreur","Veuillez remplir tous les champs")
-                return 
+                return
 
             conn =sqlite3 .connect ("commercial.db")
             cursor =conn .cursor ()
 
-            cursor .execute (
-            "SELECT * FROM users WHERE username = ? AND password = ?",
-            (username ,password ),
-            )
+            cursor .execute ("SELECT * FROM users WHERE username = ?",(username ,))
             user =cursor .fetchone ()
-            conn .close ()
 
             if user :
-                print (f"Utilisateur connecté: {username }")
-                self .withdraw ()
+                stored =user[2]
+                if verify_password (password ,stored ):
+                    if not is_password_hashed (stored ):
+                        cursor .execute (
+                        "UPDATE users SET password = ? WHERE id = ?",
+                        (hash_password (password ),user[0]),
+                        )
+                        conn .commit ()
+                    conn .close ()
+                    print (f"Utilisateur connecté: {username }")
+                    self .withdraw ()
 
 
-                from main_app import MainApp 
+                    from main_app import MainApp
 
 
-                app =MainApp (user ,parent =self )
+                    app =MainApp (user ,parent =self )
 
 
-                app .protocol ("WM_DELETE_WINDOW",lambda :self .on_main_app_close (app ))
+                    app .protocol ("WM_DELETE_WINDOW",lambda :self .on_main_app_close (app ))
+                    return
 
-            else :
-                messagebox .showerror (
-                "Erreur","Nom d'utilisateur ou mot de passe incorrect"
-                )
+            conn .close ()
+            messagebox .showerror (
+            "Erreur","Nom d'utilisateur ou mot de passe incorrect"
+            )
 
         except Exception as e :
             messagebox .showerror ("Erreur",f"Une erreur est survenue: {str (e )}")
@@ -350,7 +397,7 @@ class RegisterWindow (ctk .CTkToplevel ):
             "INSERT INTO users (username, password, email, full_name, is_admin) VALUES (?, ?, ?, ?, ?)",
             (
             username ,
-            password ,
+            hash_password (password ),
             email ,
             fullname ,
             0 ,
