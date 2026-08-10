@@ -12,6 +12,10 @@ from PIL import Image ,ImageTk
 _PBKDF2_ALGO ="pbkdf2"
 _PBKDF2_ITERATIONS =600000
 
+DB_PATH =os .path .join (
+os .path .dirname (os .path .abspath (__file__ )),"commercial.db"
+)
+
 
 def hash_password (password ):
     salt =secrets .token_bytes (16 )
@@ -147,7 +151,7 @@ class LoginWindow (ctk .CTk ):
         self .create_default_admin ()
 
     def init_database (self ):
-        conn =sqlite3 .connect ("commercial.db")
+        conn =sqlite3 .connect (DB_PATH )
         cursor =conn .cursor ()
 
 
@@ -192,7 +196,7 @@ class LoginWindow (ctk .CTk ):
         conn .close ()
 
     def create_default_admin (self ):
-        conn =sqlite3 .connect ("commercial.db")
+        conn =sqlite3 .connect (DB_PATH )
         cursor =conn .cursor ()
 
 
@@ -221,7 +225,7 @@ class LoginWindow (ctk .CTk ):
                 messagebox .showerror ("Erreur","Veuillez remplir tous les champs")
                 return
 
-            conn =sqlite3 .connect ("commercial.db")
+            conn =sqlite3 .connect (DB_PATH )
             cursor =conn .cursor ()
 
             cursor .execute ("SELECT * FROM users WHERE username = ?",(username ,))
@@ -389,7 +393,7 @@ class RegisterWindow (ctk .CTkToplevel ):
             messagebox .showerror ("Erreur","Les mots de passe ne correspondent pas")
             return 
 
-        conn =sqlite3 .connect ("commercial.db")
+        conn =sqlite3 .connect (DB_PATH )
         cursor =conn .cursor ()
 
         try :

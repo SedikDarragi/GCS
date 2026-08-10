@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
-from main import verify_password
+from main import DB_PATH, verify_password
 
 try:
     from reportlab.lib import colors
@@ -190,7 +190,7 @@ class MainApp(ctk.CTkToplevel):
 
         self.current_frame = None
 
-        self.db_path = "commercial.db"
+        self.db_path = DB_PATH
         self.init_db()
 
         self._setup_ttk_style()
@@ -6372,7 +6372,7 @@ class MainApp(ctk.CTkToplevel):
 
             return card
 
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         cursor.execute("SELECT COUNT(*) FROM products")
@@ -6457,7 +6457,7 @@ class MainApp(ctk.CTkToplevel):
         for item in self.sales_tree.get_children():
             self.sales_tree.delete(item)
 
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         cursor.execute(
@@ -6622,7 +6622,7 @@ class MainApp(ctk.CTkToplevel):
         for item in self.products_tree.get_children():
             self.products_tree.delete(item)
 
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         if search_query:
@@ -6687,7 +6687,7 @@ class MainApp(ctk.CTkToplevel):
                 price = float(price)
                 stock = int(stock)
 
-                conn = sqlite3.connect("commercial.db")
+                conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -6859,7 +6859,7 @@ class MainApp(ctk.CTkToplevel):
             return
 
         # Get matching products from database
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -7012,7 +7012,7 @@ class MainApp(ctk.CTkToplevel):
         item_values = self.products_tree.item(selected_item, "values")
         product_id = item_values[0]
 
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
         product = cursor.fetchone()
@@ -7104,7 +7104,7 @@ class MainApp(ctk.CTkToplevel):
                 price = float(price)
                 stock = int(stock)
 
-                conn = sqlite3.connect("commercial.db")
+                conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -8049,7 +8049,7 @@ class MainApp(ctk.CTkToplevel):
         for item in self.users_tree.get_children():
             self.users_tree.delete(item)
 
-        conn = sqlite3.connect("commercial.db")
+        conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
             cursor.execute(
