@@ -317,7 +317,7 @@ class MainApp(ctk.CTkToplevel):
         user_frame.pack(side="bottom", fill="x", padx=10, pady=10)
 
         ctk.CTkLabel(
-            user_frame, text=ft("sidebar.logged_in_as"), font=("Arial", 10)
+            user_frame, text=t("sidebar.logged_in_as"), font=("Arial", 10)
         ).pack(anchor="w")
 
         ctk.CTkLabel(
