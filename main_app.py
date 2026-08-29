@@ -316,9 +316,10 @@ class MainApp(ctk.CTkToplevel):
         user_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         user_frame.pack(side="bottom", fill="x", padx=10, pady=10)
 
-        ctk.CTkLabel(
+        self.logged_in_label = ctk.CTkLabel(
             user_frame, text=t("sidebar.logged_in_as"), font=("Arial", 10)
-        ).pack(anchor="w")
+        )
+        self.logged_in_label.pack(anchor="w")
 
         ctk.CTkLabel(
             user_frame, text=f"{self.user['username']}", font=("Arial", 12, "bold")
@@ -399,10 +400,12 @@ class MainApp(ctk.CTkToplevel):
         self.apply_language()
 
     def apply_language(self):
+        # Window title
         try:
             self.title(t("app.window_title_connected", username=self.user.get("username","")))
         except Exception:
             pass
+        # Sidebar
         try:
             if hasattr(self, "menu_label"):
                 self.menu_label.configure(text=t("sidebar.menu_heading"))
@@ -432,6 +435,11 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
         try:
+            if hasattr(self, "logged_in_label"):
+                self.logged_in_label.configure(text=t("sidebar.logged_in_as"))
+        except Exception:
+            pass
+        try:
             if hasattr(self, "lang_frame"):
                 for ch in self.lang_frame.winfo_children():
                     if isinstance(ch, ctk.CTkLabel):
@@ -439,11 +447,153 @@ class MainApp(ctk.CTkToplevel):
                         break
         except Exception:
             pass
+        # Articles frame
         try:
+            if hasattr(self, "articles_header_label"):
+                self.articles_header_label.configure(text=t("articles.header_title"))
+            if hasattr(self, "articles_add_btn"):
+                self.articles_add_btn.configure(text=t("articles.button_add"))
             if hasattr(self, "delete_article_btn"):
                 self.delete_article_btn.configure(text=t("common.delete"))
+            if hasattr(self, "article_search_entry"):
+                self.article_search_entry.configure(placeholder_text=t("articles.search_placeholder"))
+            if hasattr(self, "articles_search_btn"):
+                self.articles_search_btn.configure(text=t("common.search"))
+            if hasattr(self, "articles_tree"):
+                try:
+                    cols = list(self.articles_tree["columns"])
+                    keys = ["ID", "articles.heading_reference", "articles.heading_designation", "articles.heading_pa", "articles.heading_pv", "articles.heading_tva", "articles.heading_margin", "articles.heading_stock"]
+                    for col_id, k in zip(cols, keys):
+                        txt = "ID" if k == "ID" else t(k)
+                        self.articles_tree.heading(col_id, text=txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Clients frame
+        try:
+            if hasattr(self, "clients_header_label"):
+                self.clients_header_label.configure(text=t("clients.header_title"))
+            if hasattr(self, "clients_add_btn"):
+                self.clients_add_btn.configure(text=t("clients.button_add"))
             if hasattr(self, "delete_client_btn"):
                 self.delete_client_btn.configure(text=t("common.delete"))
+            if hasattr(self, "client_search_entry"):
+                self.client_search_entry.configure(placeholder_text=t("clients.search_placeholder"))
+            if hasattr(self, "clients_search_btn"):
+                self.clients_search_btn.configure(text=t("common.search"))
+            if hasattr(self, "clients_tree"):
+                try:
+                    cols = list(self.clients_tree["columns"])
+                    keys = ["ID", "clients.col_name", "register.email_placeholder", "clients.col_phone", "clients.col_address", "clients.col_tax_id"]
+                    for col_id, k in zip(cols, keys):
+                        txt = "ID" if k == "ID" else t(k)
+                        self.clients_tree.heading(col_id, text=txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Documents frames
+        try:
+            header_map = {
+                "devis": "documents.header_devis",
+                "bl": "documents.header_bl",
+                "factures": "documents.header_factures",
+                "reception": "documents.header_reception",
+            }
+            new_btn_map = {
+                "devis": "documents.button_new_devis",
+                "bl": "documents.button_new_bl",
+                "factures": "documents.button_new_factures",
+                "reception": "documents.button_new_reception",
+            }
+            for key in ["devis", "bl", "factures", "reception"]:
+                if hasattr(self, "doc_headers") and key in getattr(self, "doc_headers", {}):
+                    hk = header_map.get(key)
+                    if hk:
+                        self.doc_headers[key].configure(text=t(hk))
+                if hasattr(self, "doc_new_buttons") and key in getattr(self, "doc_new_buttons", {}):
+                    nbk = new_btn_map.get(key)
+                    if nbk:
+                        self.doc_new_buttons[key].configure(text=t(nbk))
+                if hasattr(self, "doc_delete_buttons") and key in getattr(self, "doc_delete_buttons", {}):
+                    self.doc_delete_buttons[key].configure(text=t("common.delete"))
+                if hasattr(self, "doc_convert_buttons") and key in getattr(self, "doc_convert_buttons", {}):
+                    # devis -> bl, bl -> factures
+                    if key == "devis":
+                        self.doc_convert_buttons[key].configure(text=t("documents.button_convert_devis_to_bl"))
+                    elif key == "bl":
+                        self.doc_convert_buttons[key].configure(text=t("documents.button_convert_bl_to_invoice"))
+                if hasattr(self, "doc_validate_buttons") and key in getattr(self, "doc_validate_buttons", {}):
+                    if key == "bl":
+                        self.doc_validate_buttons[key].configure(text=t("documents.button_validate_bl"))
+                    elif key == "reception":
+                        self.doc_validate_buttons[key].configure(text=t("documents.button_validate_reception"))
+                if hasattr(self, "document_search_entries") and key in getattr(self, "document_search_entries", {}):
+                    self.document_search_entries[key].configure(placeholder_text=t("documents.search_placeholder"))
+                if hasattr(self, "doc_search_buttons") and key in getattr(self, "doc_search_buttons", {}):
+                    self.doc_search_buttons[key].configure(text=t("common.search"))
+                if hasattr(self, "documents_trees") and key in getattr(self, "documents_trees", {}):
+                    tree = self.documents_trees[key]
+                    try:
+                        cols = list(tree["columns"])
+                        keys = ["ID", "client_dialog.col_number", "documents.col_client", "article_dialog.col_date", "client_dialog.col_status", "documents.col_ht", "documents.col_tva", "documents.col_ttc"]
+                        for col_id, k in zip(cols, keys):
+                            txt = "ID" if k == "ID" else t(k)
+                            tree.heading(col_id, text=txt)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Paiements frame
+        try:
+            if hasattr(self, "paiements_header_label"):
+                self.paiements_header_label.configure(text=t("paiements.header_title"))
+            if hasattr(self, "paiements_clients_heading"):
+                self.paiements_clients_heading.configure(text=t("paiements.clients_unpaid_heading"))
+            if hasattr(self, "paiements_docs_heading"):
+                self.paiements_docs_heading.configure(text=t("paiements.docs_unpaid_heading"))
+            if hasattr(self, "paiements_client_search"):
+                self.paiements_client_search.configure(placeholder_text=t("paiements.search_client_placeholder"))
+            if hasattr(self, "paiements_search_btn"):
+                self.paiements_search_btn.configure(text=t("common.search"))
+            if hasattr(self, "paiements_doc_search"):
+                self.paiements_doc_search.configure(placeholder_text=t("paiements.search_doc_placeholder"))
+            if hasattr(self, "paiements_doc_search_btn"):
+                self.paiements_doc_search_btn.configure(text=t("common.search"))
+            if hasattr(self, "paiements_refresh_btn"):
+                self.paiements_refresh_btn.configure(text=t("paiements.button_refresh"))
+            if hasattr(self, "paiements_record_btn"):
+                self.paiements_record_btn.configure(text=t("paiements.button_record_payment"))
+            if hasattr(self, "paiements_mark_paid_btn"):
+                self.paiements_mark_paid_btn.configure(text=t("paiements.button_mark_paid"))
+            if hasattr(self, "clients_unpaid_tree"):
+                try:
+                    cols = list(self.clients_unpaid_tree["columns"])
+                    # Expected: ClientID, Customer, Impayé/Outstanding
+                    keys = ["ClientID", "documents.col_client", "paiements.col_unpaid"]
+                    for col_id, k in zip(cols, keys):
+                        txt = "ClientID" if k == "ClientID" else t(k)
+                        self.clients_unpaid_tree.heading(col_id, text=txt)
+                except Exception:
+                    pass
+                except Exception:
+                    pass
+            if hasattr(self, "client_docs_tree"):
+                try:
+                    cols = list(self.client_docs_tree["columns"])
+                    keys = ["ID", "client_dialog.col_number", "client_dialog.col_type", "documents.col_ttc", "common.paid", "paiements.col_remaining"]
+                    for col_id, k in zip(cols, keys):
+                        txt = "ID" if k == "ID" else t(k)
+                        self.client_docs_tree.heading(col_id, text=txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Reload paiements data to refresh Paid/Outstanding texts
+        try:
+            if hasattr(self, "load_paiements"):
+                self.load_paiements()
         except Exception:
             pass
 
@@ -1121,7 +1271,8 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text=t("articles.header_title"), font=self.ui["font_h1"]).pack(side="left")
+        self.articles_header_label = ctk.CTkLabel(header, text=t("articles.header_title"), font=self.ui["font_h1"])
+        self.articles_header_label.pack(side="left")
 
         self.delete_article_btn = ctk.CTkButton(
             header,
@@ -1134,9 +1285,10 @@ class MainApp(ctk.CTkToplevel):
         )
         self.delete_article_btn.pack(side="right", padx=(6, 0))
 
-        ctk.CTkButton(
+        self.articles_add_btn = ctk.CTkButton(
             header, text=t("articles.button_add"), command=self.show_add_article_dialog
-        ).pack(side="right")
+        )
+        self.articles_add_btn.pack(side="right")
 
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
         search_frame.pack(fill="x", pady=(0, 20))
@@ -1164,9 +1316,10 @@ class MainApp(ctk.CTkToplevel):
         self.article_dropdown_items = []
 
         # Search button
-        ctk.CTkButton(
+        self.articles_search_btn = ctk.CTkButton(
             search_frame, text=t("common.search"), command=self.search_articles
-        ).pack(side="left")
+        )
+        self.articles_search_btn.pack(side="left")
 
         # Bind events for autocomplete
         self.article_search_entry.bind(
@@ -2156,34 +2309,43 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text=title, font=self.ui["font_h1"]).pack(side="left")
+        self.doc_headers = getattr(self, "doc_headers", {})
+        self.doc_headers[key] = ctk.CTkLabel(header, text=title, font=self.ui["font_h1"])
+        self.doc_headers[key].pack(side="left")
 
         actions_left = ctk.CTkFrame(header, fg_color="transparent")
         actions_left.pack(side="right")
 
+        self.doc_convert_buttons = getattr(self, "doc_convert_buttons", {})
         if key == "devis":
-            ctk.CTkButton(
+            self.doc_convert_buttons[key] = ctk.CTkButton(
                 actions_left,
                 text=t("documents.button_convert_devis_to_bl"),
                 command=lambda k=key: self.convert_selected_document(k, "bl"),
-            ).pack(side="right", padx=(10, 0))
+            )
+            self.doc_convert_buttons[key].pack(side="right", padx=(10, 0))
         elif key == "bl":
-            ctk.CTkButton(
+            self.doc_convert_buttons[key] = ctk.CTkButton(
                 actions_left,
                 text=t("documents.button_convert_bl_to_invoice"),
                 command=lambda k=key: self.convert_selected_document(k, "factures"),
-            ).pack(side="right", padx=(10, 0))
-            ctk.CTkButton(
+            )
+            self.doc_convert_buttons[key].pack(side="right", padx=(10, 0))
+            self.doc_validate_buttons = getattr(self, "doc_validate_buttons", {})
+            self.doc_validate_buttons[key] = ctk.CTkButton(
                 actions_left,
                 text=t("documents.button_validate_bl"),
                 command=lambda k=key: self.validate_selected_document(k),
-            ).pack(side="right", padx=(10, 0))
+            )
+            self.doc_validate_buttons[key].pack(side="right", padx=(10, 0))
         elif key == "reception":
-            ctk.CTkButton(
+            self.doc_validate_buttons = getattr(self, "doc_validate_buttons", {})
+            self.doc_validate_buttons[key] = ctk.CTkButton(
                 actions_left,
                 text=t("documents.button_validate_reception"),
                 command=lambda k=key: self.validate_selected_document(k),
-            ).pack(side="right", padx=(10, 0))
+            )
+            self.doc_validate_buttons[key].pack(side="right", padx=(10, 0))
 
         self.doc_delete_buttons = getattr(self, "doc_delete_buttons", {})
         del_btn = ctk.CTkButton(
@@ -2197,11 +2359,14 @@ class MainApp(ctk.CTkToplevel):
         del_btn.pack(side="right", padx=(10, 0))
         self.doc_delete_buttons[key] = del_btn
 
-        ctk.CTkButton(
+        self.doc_new_buttons = getattr(self, "doc_new_buttons", {})
+        _new_btn_key = {"devis": "documents.button_new_devis", "bl": "documents.button_new_bl", "factures": "documents.button_new_factures", "reception": "documents.button_new_reception"}.get(key, "documents.button_new_devis")
+        self.doc_new_buttons[key] = ctk.CTkButton(
             actions_left,
-            text=f"+ Nouveau {title}",
+            text=t(_new_btn_key),
             command=lambda k=key, t=title: self.show_new_document_dialog(k, t),
-        ).pack(side="right")
+        )
+        self.doc_new_buttons[key].pack(side="right")
 
         self.document_search_entries = getattr(self, "document_search_entries", {})
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
@@ -2227,11 +2392,13 @@ class MainApp(ctk.CTkToplevel):
         self.doc_dropdowns[key] = {"frame": dropdown, "items": []}
 
         # Search button
-        ctk.CTkButton(
+        self.doc_search_buttons = getattr(self, "doc_search_buttons", {})
+        self.doc_search_buttons[key] = ctk.CTkButton(
             search_frame,
             text=t("common.search"),
             command=lambda k=key: self.search_documents(k),
-        ).pack(side="left")
+        )
+        self.doc_search_buttons[key].pack(side="left")
 
         # Bind autocomplete events
         self.document_search_entries[key].bind(
@@ -4862,9 +5029,8 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkLabel(header, text=t("paiements.header_title"), font=self.ui["font_h1"]).pack(
-            side="left"
-        )
+        self.paiements_header_label = ctk.CTkLabel(header, text=t("paiements.header_title"), font=self.ui["font_h1"])
+        self.paiements_header_label.pack(side="left")
 
         container = ctk.CTkFrame(frame, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=6, pady=(8, 0))
@@ -4875,9 +5041,8 @@ class MainApp(ctk.CTkToplevel):
         right = ctk.CTkFrame(container, fg_color="transparent")
         right.pack(side="right", fill="both", expand=True, pady=6)
 
-        ctk.CTkLabel(left, text=t("paiements.clients_unpaid_heading"), font=self.ui.get("font_h2")).pack(
-            anchor="w", pady=(0, 8)
-        )
+        self.paiements_clients_heading = ctk.CTkLabel(left, text=t("paiements.clients_unpaid_heading"), font=self.ui.get("font_h2"))
+        self.paiements_clients_heading.pack(anchor="w", pady=(0, 8))
 
         client_search_frame = ctk.CTkFrame(left, fg_color="transparent")
         client_search_frame.pack(fill="x", pady=(0, 6))
@@ -4905,11 +5070,12 @@ class MainApp(ctk.CTkToplevel):
         self.paiements_client_dropdown_items = []
 
         # Search button
-        ctk.CTkButton(
+        self.paiements_search_btn = ctk.CTkButton(
             client_search_frame,
             text=t("common.search"),
             command=self.search_paiements_clients,
-        ).pack(side="left", padx=(4, 0))
+        )
+        self.paiements_search_btn.pack(side="left", padx=(4, 0))
 
         # Bind autocomplete events
         self.paiements_client_search.bind(
@@ -4943,13 +5109,13 @@ class MainApp(ctk.CTkToplevel):
 
         clients_actions = ctk.CTkFrame(left, fg_color="transparent")
         clients_actions.pack(fill="x", pady=(8, 0))
-        ctk.CTkButton(
+        self.paiements_refresh_btn = ctk.CTkButton(
             clients_actions, text=t("paiements.button_refresh"), command=self.load_paiements
-        ).pack(side="left")
-
-        ctk.CTkLabel(right, text=t("paiements.docs_unpaid_heading"), font=self.ui.get("font_h2")).pack(
-            anchor="w", pady=(0, 8)
         )
+        self.paiements_refresh_btn.pack(side="left")
+
+        self.paiements_docs_heading = ctk.CTkLabel(right, text=t("paiements.docs_unpaid_heading"), font=self.ui.get("font_h2"))
+        self.paiements_docs_heading.pack(anchor="w", pady=(0, 8))
 
         doc_search_frame = ctk.CTkFrame(right, fg_color="transparent")
         doc_search_frame.pack(fill="x", pady=(0, 6))
@@ -4977,9 +5143,10 @@ class MainApp(ctk.CTkToplevel):
         self.paiements_doc_dropdown_items = []
 
         # Search button
-        ctk.CTkButton(
+        self.paiements_doc_search_btn = ctk.CTkButton(
             doc_search_frame, text=t("common.search"), command=self.search_paiements_docs
-        ).pack(side="left", padx=(4, 0))
+        )
+        self.paiements_doc_search_btn.pack(side="left", padx=(4, 0))
 
         # Bind autocomplete events
         self.paiements_doc_search.bind(
@@ -5012,16 +5179,18 @@ class MainApp(ctk.CTkToplevel):
 
         doc_actions = ctk.CTkFrame(right, fg_color="transparent")
         doc_actions.pack(fill="x", pady=(8, 0))
-        ctk.CTkButton(
+        self.paiements_record_btn = ctk.CTkButton(
             doc_actions,
             text=t("paiements.button_record_payment"),
             command=lambda: self.show_add_payment_dialog_for_selected(),
-        ).pack(side="left")
-        ctk.CTkButton(
+        )
+        self.paiements_record_btn.pack(side="left")
+        self.paiements_mark_paid_btn = ctk.CTkButton(
             doc_actions,
             text=t("paiements.button_mark_paid"),
             command=lambda: self.mark_selected_document_paid_full(),
-        ).pack(side="left", padx=8)
+        )
+        self.paiements_mark_paid_btn.pack(side="left", padx=8)
 
         self.clients_unpaid_tree.bind(
             "<<TreeviewSelect>>", lambda e: self._on_client_selected()
@@ -7260,9 +7429,8 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text=t("clients.header_title"), font=self.ui["font_h1"]).pack(
-            side="left"
-        )
+        self.clients_header_label = ctk.CTkLabel(header, text=t("clients.header_title"), font=self.ui["font_h1"])
+        self.clients_header_label.pack(side="left")
 
         self.delete_client_btn = ctk.CTkButton(
             header,
@@ -7275,11 +7443,12 @@ class MainApp(ctk.CTkToplevel):
         )
         self.delete_client_btn.pack(side="right", padx=(6, 0))
 
-        ctk.CTkButton(
+        self.clients_add_btn = ctk.CTkButton(
             header,
             text=t("clients.button_add"),
             command=lambda: self.show_client_dialog(None),
-        ).pack(side="right", padx=(0, 6))
+        )
+        self.clients_add_btn.pack(side="right", padx=(0, 6))
 
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
         search_frame.pack(fill="x", pady=(0, 20))
@@ -7307,9 +7476,10 @@ class MainApp(ctk.CTkToplevel):
         self.client_dropdown_items = []
 
         # Search button
-        ctk.CTkButton(
+        self.clients_search_btn = ctk.CTkButton(
             search_frame, text=t("common.search"), command=self.search_clients
-        ).pack(side="left")
+        )
+        self.clients_search_btn.pack(side="left")
 
         # Bind events for autocomplete
         self.client_search_entry.bind("<KeyRelease>", self.on_client_search_keyrelease)
