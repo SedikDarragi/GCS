@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 from main import DB_PATH, verify_password
+from i18n import get_language, set_language, t
 
 try:
     from reportlab.lib import colors
@@ -154,7 +155,7 @@ class MainApp(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.title(
-            f"Gestion Commerciale - Connecté en tant que {self.user['username']}"
+            t("app.window_title_connected", username=self.user['username'])
         )
         self.geometry("1400x800")
         self.minsize(1200, 700)
@@ -247,25 +248,45 @@ class MainApp(ctk.CTkToplevel):
 
         self.logo_label.pack(pady=20, padx=10)
 
+        # --- Language switcher ---
+        try:
+            self.lang_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+            self.lang_frame.pack(fill="x", padx=10, pady=(6, 4))
+            ctk.CTkLabel(self.lang_frame, text=t("login.language_label") + ":", font=("Arial", 11)).pack(side="left", padx=(4, 6))
+            self.lang_var = ctk.StringVar(value="EN" if get_language() == "en" else "FR")
+            try:
+                self.lang_switch = ctk.CTkSegmentedButton(
+                    self.lang_frame, values=["EN", "FR"], command=self.on_language_change, width=120
+                )
+                self.lang_switch.set(self.lang_var.get())
+                self.lang_switch.pack(side="right", padx=4)
+            except Exception:
+                self.lang_switch = ctk.CTkOptionMenu(
+                    self.lang_frame, values=["EN", "FR"], variable=self.lang_var, command=self.on_language_change, width=80
+                )
+                self.lang_switch.pack(side="right", padx=4)
+        except Exception as e:
+            print(f"Language switcher init failed: {e}")
+
         self.menu_label = ctk.CTkLabel(
-            self.sidebar, text="MENU", font=self.ui["font_h2"]
+            self.sidebar, text=t("sidebar.menu_heading"), font=self.ui["font_h2"]
         )
         self.menu_label.pack(pady=(20, 10), padx=10, anchor="w")
 
         nav_buttons = [
-            ("Articles", "articles"),
-            ("Clients", "clients"),
-            ("Devis", "devis"),
-            ("Bon de livraison", "bl"),
-            ("Factures", "factures"),
-            ("Bon de réception", "reception"),
-            ("Paiements / Impayés", "paiements"),
+            (t("nav.articles"), "articles"),
+            (t("nav.clients"), "clients"),
+            (t("nav.devis"), "devis"),
+            (t("nav.bl"), "bl"),
+            (t("nav.factures"), "factures"),
+            (t("nav.reception"), "reception"),
+            (t("nav.paiements"), "paiements"),
         ]
 
         if self.user.get("is_admin"):
-            nav_buttons.append(("Administration", "admin"))
+            nav_buttons.append((t("nav.admin"), "admin"))
 
-        nav_buttons.append(("À propos", "about"))
+        nav_buttons.append((t("nav.about"), "about"))
 
         self.nav_buttons = {}
         for text, command in nav_buttons:
@@ -296,7 +317,7 @@ class MainApp(ctk.CTkToplevel):
         user_frame.pack(side="bottom", fill="x", padx=10, pady=10)
 
         ctk.CTkLabel(
-            user_frame, text=f"Connecté en tant que :", font=("Arial", 10)
+            user_frame, text=ft("sidebar.logged_in_as"), font=("Arial", 10)
         ).pack(anchor="w")
 
         ctk.CTkLabel(
@@ -305,7 +326,7 @@ class MainApp(ctk.CTkToplevel):
 
         self.logout_btn = ctk.CTkButton(
             user_frame,
-            text="Déconnexion",
+            text=t("sidebar.logout"),
             command=self.logout,
             fg_color=self.ui["danger_fg"],
             hover_color=self.ui["danger_hover"],
@@ -318,7 +339,7 @@ class MainApp(ctk.CTkToplevel):
         try:
             about_lbl = ctk.CTkLabel(
                 self.sidebar,
-                text="À propos",
+                text=t("nav.about"),
                 text_color="blue",
                 cursor="hand2",
                 font=("Arial", 10, "underline"),
@@ -341,10 +362,10 @@ class MainApp(ctk.CTkToplevel):
 
         self.create_articles_frame()
         self.create_clients_frame()
-        self.create_documents_frame("devis", "Devis")
-        self.create_documents_frame("bl", "Bon de livraison")
-        self.create_documents_frame("factures", "Factures")
-        self.create_documents_frame("reception", "Bon de réception")
+        self.create_documents_frame("devis", t("nav.devis"))
+        self.create_documents_frame("bl", t("nav.bl"))
+        self.create_documents_frame("factures", t("nav.factures"))
+        self.create_documents_frame("reception", t("nav.reception"))
         self.create_paiements_frame()
 
     def show_frame(self, frame_name):
@@ -363,6 +384,69 @@ class MainApp(ctk.CTkToplevel):
                 btn.configure(fg_color=self.ui["sidebar_btn_active_fg"])
             else:
                 btn.configure(fg_color=self.ui["sidebar_btn_fg"])
+
+    def on_language_change(self, value):
+        lang_code = "en" if str(value).upper().startswith("EN") else "fr"
+        set_language(lang_code)
+        try:
+            self.lang_var.set("EN" if lang_code == "en" else "FR")
+            try:
+                self.lang_switch.set(self.lang_var.get())
+            except Exception:
+                pass
+        except Exception:
+            pass
+        self.apply_language()
+
+    def apply_language(self):
+        try:
+            self.title(t("app.window_title_connected", username=self.user.get("username","")))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "menu_label"):
+                self.menu_label.configure(text=t("sidebar.menu_heading"))
+        except Exception:
+            pass
+        try:
+            nav_map = {
+                "articles": "nav.articles",
+                "clients": "nav.clients",
+                "devis": "nav.devis",
+                "bl": "nav.bl",
+                "factures": "nav.factures",
+                "reception": "nav.reception",
+                "paiements": "nav.paiements",
+                "admin": "nav.admin",
+                "about": "nav.about",
+            }
+            for key, btn in getattr(self, "nav_buttons", {}).items():
+                k = nav_map.get(key)
+                if k:
+                    btn.configure(text=t(k))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "logout_btn"):
+                self.logout_btn.configure(text=t("sidebar.logout"))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "lang_frame"):
+                for ch in self.lang_frame.winfo_children():
+                    if isinstance(ch, ctk.CTkLabel):
+                        ch.configure(text=t("login.language_label") + ":")
+                        break
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "delete_article_btn"):
+                self.delete_article_btn.configure(text=t("common.delete"))
+            if hasattr(self, "delete_client_btn"):
+                self.delete_client_btn.configure(text=t("common.delete"))
+        except Exception:
+            pass
+
 
     def _setup_ttk_style(self):
         style = ttk.Style()
@@ -430,7 +514,7 @@ class MainApp(ctk.CTkToplevel):
                 self._admin_win = admin_win
             except Exception:
                 pass
-            admin_win.title("Paramètres d'administration")
+            admin_win.title(t("admin.window_title"))
             admin_win.geometry("900x600")
             try:
                 admin_win.transient(self)
@@ -457,7 +541,7 @@ class MainApp(ctk.CTkToplevel):
             header.pack(fill="x", padx=16, pady=(12, 6))
             ctk.CTkLabel(
                 header,
-                text="Paramètres d'administration",
+                text=t("admin.window_title"),
                 font=self.ui.get("font_h1", ("Arial", 24, "bold")),
             ).pack(side="left")
 
@@ -471,8 +555,8 @@ class MainApp(ctk.CTkToplevel):
             detail.pack(side="right", fill="both", expand=True, pady=6)
 
             sections = [
-                ("Utilisateurs", "users"),
-                ("Paramètres système", "system"),
+                (t("admin.section_users"), "users"),
+                (t("admin.section_system"), "system"),
             ]
 
             btns = {}
@@ -484,17 +568,17 @@ class MainApp(ctk.CTkToplevel):
             def show_users_section():
                 clear_detail()
                 ctk.CTkLabel(
-                    detail, text="Utilisateurs", font=self.ui.get("font_h2")
+                    detail, text=t("admin.section_users"), font=self.ui.get("font_h2")
                 ).pack(anchor="w", pady=(6, 8))
 
                 tree_frame = ctk.CTkFrame(detail, fg_color="transparent")
                 tree_frame.pack(fill="both", expand=True)
-                cols = ("ID", "Nom d'utilisateur", "Email", "Nom complet", "Admin")
+                cols = ("ID", t("login.username_placeholder"), t("register.email_placeholder"), t("register.fullname_placeholder"), t("admin.col_admin"))
                 users_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
                 for c in cols:
                     users_tree.heading(c, text=c)
                     users_tree.column(c, width=120, anchor="center")
-                users_tree.column("Email", width=200, anchor="w")
+                users_tree.column(t("register.email_placeholder"), width=200, anchor="w")
                 scrollbar = ttk.Scrollbar(
                     tree_frame, orient="vertical", command=users_tree.yview
                 )
@@ -517,7 +601,7 @@ class MainApp(ctk.CTkToplevel):
                                 r[1],
                                 r[2] or "",
                                 r[3] or "",
-                                "Oui" if r[4] else "Non",
+                                t("common.yes") if r[4] else t("common.no"),
                             ),
                         )
                 except Exception as e:
@@ -531,33 +615,33 @@ class MainApp(ctk.CTkToplevel):
                 footer = ctk.CTkFrame(detail, fg_color="transparent")
                 footer.pack(fill="x", pady=(8, 0))
                 ctk.CTkButton(
-                    footer, text="Créer un utilisateur", state="disabled"
+                    footer, text=t("admin.button_create_user"), state="disabled"
                 ).pack(side="left")
                 ctk.CTkButton(
-                    footer, text="Modifier (sélection)", state="disabled"
+                    footer, text=t("admin.button_edit_selection"), state="disabled"
                 ).pack(side="left", padx=8)
 
             def show_system_section():
                 clear_detail()
                 ctk.CTkLabel(
-                    detail, text="Paramètres système", font=self.ui.get("font_h2")
+                    detail, text=t("admin.section_system"), font=self.ui.get("font_h2")
                 ).pack(anchor="w", pady=(6, 8))
                 sys_frame = ctk.CTkFrame(detail, fg_color="transparent")
                 sys_frame.pack(fill="both", expand=True)
 
                 ctk.CTkLabel(
                     sys_frame,
-                    text="Sauvegarde / Restauration",
+                    text=t("admin.backup_restore_heading"),
                     font=self.ui.get("font_body"),
                 ).pack(anchor="w", pady=(4, 2))
                 ctk.CTkButton(
                     sys_frame,
-                    text="Sauvegarder la base de données",
+                    text=t("admin.button_backup"),
                     command=self._admin_backup_db,
                 ).pack(anchor="w")
                 ctk.CTkButton(
                     sys_frame,
-                    text="Restaurer la base de données",
+                    text=t("admin.button_restore"),
                     command=self._admin_restore_db,
                 ).pack(anchor="w", pady=(6, 0))
 
@@ -569,8 +653,8 @@ class MainApp(ctk.CTkToplevel):
                     # Ask for password first
                     from tkinter import simpledialog
                     password = simpledialog.askstring(
-                        "Confirmation mot de passe",
-                        "Entrez votre mot de passe pour continuer:",
+                        t("admin.password_confirm_title"),
+                        t("admin.password_confirm_prompt"),
                         show="*"
                     )
                     if not password:
@@ -590,26 +674,26 @@ class MainApp(ctk.CTkToplevel):
 
                     stored = row[0] if row else None
                     if not stored or not verify_password(password, stored):
-                        messagebox.showerror("Mot de passe incorrect", "Le mot de passe est incorrect.")
+                        messagebox.showerror("Mot de passe incorrect", t("admin.error_wrong_password"))
                         return
                     
                     if not messagebox.askokcancel(
-                        "Effacer la base de données",
-                        "ATTENTION: Ceci va supprimer définitivement la base de données SANS créer de sauvegarde. Continuer ?",
+                        t("admin.button_wipe"),
+                        t("admin.confirm_wipe_no_backup"),
                     ):
                         return
                     self._admin_wipe_db(skip_backup=True)
 
                 ctk.CTkButton(
                     sys_frame,
-                    text="Effacer la base de données",
+                    text=t("admin.button_wipe"),
                     command=_wipe_confirm,
                     fg_color=self.ui.get("danger_fg", "#FF4B4B"),
                     hover_color=self.ui.get("danger_hover", "#FF0000"),
                 ).pack(anchor="w", pady=(10, 0))
 
                 ctk.CTkLabel(
-                    sys_frame, text="Options", font=self.ui.get("font_body")
+                    sys_frame, text=t("admin.options_heading"), font=self.ui.get("font_body")
                 ).pack(anchor="w", pady=(12, 2))
 
                 def _toggle_reserve_var():
@@ -619,7 +703,7 @@ class MainApp(ctk.CTkToplevel):
                 reserve_frame.pack(anchor="w", pady=(4, 2))
                 ctk.CTkLabel(
                     reserve_frame,
-                    text="Activer réservation automatique pour Devis",
+                    text=t("admin.toggle_auto_reserve"),
                     font=self.ui.get("font_body"),
                 ).pack(side="left")
                 ctk.CTkSwitch(reserve_frame, command=_toggle_reserve_var).pack(
@@ -642,7 +726,7 @@ class MainApp(ctk.CTkToplevel):
             bottom.pack(fill="x", padx=16, pady=10)
             ctk.CTkButton(
                 bottom,
-                text="Fermer",
+                text=t("common.close"),
                 command=admin_win.destroy,
                 fg_color="gray",
                 hover_color="darkgray",
@@ -653,7 +737,7 @@ class MainApp(ctk.CTkToplevel):
     def open_about_dialog(self):
         try:
             dialog = ctk.CTkToplevel(self)
-            dialog.title("À propos - GCS")
+            dialog.title(t("about.dialog_title"))
             dialog.geometry("420x220")
             try:
                 dialog.transient(self)
@@ -664,7 +748,7 @@ class MainApp(ctk.CTkToplevel):
             ctk.CTkLabel(dialog, text="GCS", font=("Arial", 18, "bold")).pack(
                 pady=(16, 4)
             )
-            ctk.CTkLabel(dialog, text="Version: 0.1.22 beta", font=("Arial", 12)).pack(
+            ctk.CTkLabel(dialog, text=t("about.version_mainapp"), font=("Arial", 12)).pack(
                 pady=(0, 8)
             )
 
@@ -695,14 +779,14 @@ class MainApp(ctk.CTkToplevel):
 
             ctk.CTkButton(
                 dialog,
-                text="Fermer",
+                text=t("common.close"),
                 command=dialog.destroy,
                 fg_color="gray",
                 hover_color="darkgray",
             ).pack(pady=8)
         except Exception:
             messagebox.showinfo(
-                "À propos", "GCS\nVersion: 0.1.0 beta\nContact: sedikdarragi@gmail.com"
+                t("login.about_link"), "GCS\nVersion: 0.1.0 beta\nContact: sedikdarragi@gmail.com"
             )
 
     def _admin_wipe_db(self, skip_backup: bool = False):
@@ -714,9 +798,8 @@ class MainApp(ctk.CTkToplevel):
         backup_path = None
         if not skip_backup:
             choice = messagebox.askyesnocancel(
-                "Effacer la base de données",
-                "Voulez-vous créer une sauvegarde avant d'effacer la base ?\n\n"
-                "Oui = sauvegarder puis effacer, Non = effacer sans sauvegarde, Annuler = annuler.",
+                t("admin.wipe_title"),
+                t("admin.wipe_backup_question"),
             )
 
             if choice is None:
@@ -734,21 +817,21 @@ class MainApp(ctk.CTkToplevel):
                     shutil.copyfile(self.db_path, path)
                     backup_path = path
                 except Exception as e:
-                    messagebox.showerror("Sauvegarde", f"Échec de la sauvegarde: {e}")
+                    messagebox.showerror(t("admin.backup_title"), t("admin.backup_failed", error=str(e)))
                     return
 
         try:
             if os.path.exists(self.db_path):
                 os.remove(self.db_path)
         except Exception as e:
-            messagebox.showerror("Effacer DB", f"Impossible de supprimer la base: {e}")
+            messagebox.showerror(t("admin.wipe_title"), t("admin.wipe_error_delete", error=str(e)))
             return
 
         try:
             self.init_db()
         except Exception as e:
             messagebox.showerror(
-                "Effacer DB", f"Erreur lors de la réinitialisation: {e}"
+                "Effacer DB", t("admin.wipe_error_reinit", error=str(e))
             )
             return
 
@@ -795,11 +878,11 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
 
-        msg = "Base réinitialisée avec succès."
+        msg = t("admin.wipe_success")
         if backup_path:
             msg += f" Une sauvegarde a été créée: {backup_path}"
         else:
-            msg += " Aucune sauvegarde n'a été créée."
+            msg += t("admin.wipe_no_backup")
 
         messagebox.showinfo("Effacer DB", msg)
 
@@ -813,9 +896,9 @@ class MainApp(ctk.CTkToplevel):
             if not path:
                 return
             shutil.copyfile(self.db_path, path)
-            messagebox.showinfo("Sauvegarde", f"Sauvegarde effectuée:\n{path}")
+            messagebox.showinfo(t("admin.backup_title"), f"Sauvegarde effectuée:\n{path}")
         except Exception as e:
-            messagebox.showerror("Sauvegarde", f"Échec de la sauvegarde: {e}")
+            messagebox.showerror(t("admin.backup_title"), t("admin.backup_failed", error=str(e)))
 
     def _admin_restore_db(self):
         try:
@@ -825,16 +908,15 @@ class MainApp(ctk.CTkToplevel):
             if not src:
                 return
             if not messagebox.askokcancel(
-                "Restaurer",
-                "Restaurer la base de données remplacera la base actuelle. Continuer?",
+                t("admin.restore_title"),
+                t("admin.restore_warning"),
             ):
                 return
 
             backup_path = None
             choice = messagebox.askyesnocancel(
-                "Restaurer",
-                "Voulez-vous créer une sauvegarde de la base actuelle avant la restauration ?\n\n"
-                "Oui = sauvegarder puis restaurer, Non = restaurer sans sauvegarde, Annuler = annuler.",
+                t("admin.restore_title"),
+                t("admin.restore_backup_question"),
             )
             if choice is None:
                 return
@@ -852,19 +934,19 @@ class MainApp(ctk.CTkToplevel):
                     backup_path = path
                 except Exception as e:
                     messagebox.showerror(
-                        "Sauvegarde", f"Échec de la sauvegarde: {e}"
+                        t("admin.backup_title"), t("admin.backup_failed", error=str(e))
                     )
                     return
 
             shutil.copyfile(src, self.db_path)
             msg = (
-                "Restauration effectuée. Redémarrez l'application pour recharger la base."
+                t("admin.restore_done")
             )
             if backup_path:
                 msg += f"\nUne sauvegarde de la base précédente a été créée: {backup_path}"
-            messagebox.showinfo("Restaurer", msg)
+            messagebox.showinfo(t("admin.restore_title"), msg)
         except Exception as e:
-            messagebox.showerror("Restaurer", f"Échec de la restauration: {e}")
+            messagebox.showerror(t("admin.restore_title"), t("admin.restore_failed", error=str(e)))
 
     def init_db(self):
         conn = sqlite3.connect(self.db_path)
@@ -1039,11 +1121,11 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text="Articles", font=self.ui["font_h1"]).pack(side="left")
+        ctk.CTkLabel(header, text=t("articles.header_title"), font=self.ui["font_h1"]).pack(side="left")
 
         self.delete_article_btn = ctk.CTkButton(
             header,
-            text="Supprimer",
+            text=t("common.delete"),
             command=self.delete_selected_article,
             fg_color=self.ui.get("danger_fg", "#FF4B4B"),
             hover_color=self.ui.get("danger_hover", "#FF0000"),
@@ -1053,7 +1135,7 @@ class MainApp(ctk.CTkToplevel):
         self.delete_article_btn.pack(side="right", padx=(6, 0))
 
         ctk.CTkButton(
-            header, text="+ Ajouter un article", command=self.show_add_article_dialog
+            header, text=t("articles.button_add"), command=self.show_add_article_dialog
         ).pack(side="right")
 
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
@@ -1068,7 +1150,7 @@ class MainApp(ctk.CTkToplevel):
         self.article_search_entry = ctk.CTkEntry(
             self.article_search_container,
             width=350,
-            placeholder_text="Rechercher un article...",
+            placeholder_text=t("articles.search_placeholder"),
         )
         self.article_search_entry.pack(fill="x")
 
@@ -1083,7 +1165,7 @@ class MainApp(ctk.CTkToplevel):
 
         # Search button
         ctk.CTkButton(
-            search_frame, text="Rechercher", command=self.search_articles
+            search_frame, text=t("common.search"), command=self.search_articles
         ).pack(side="left")
 
         # Bind events for autocomplete
@@ -1103,35 +1185,35 @@ class MainApp(ctk.CTkToplevel):
 
         columns = (
             "ID",
-            "Référence",
-            "Désignation",
-            "PA",
-            "PV",
-            "TVA%",
-            "Marge",
-            "Stock",
+            t("articles.col_reference"),
+            t("articles.col_designation"),
+            t("articles.col_pa"),
+            t("articles.col_pv"),
+            t("articles.col_tva"),
+            t("articles.col_margin"),
+            t("articles.col_stock"),
         )
         self.articles_tree = ttk.Treeview(
             frame, columns=columns, show="headings", selectmode="browse"
         )
 
         self.articles_tree.heading("ID", text="ID", anchor="center")
-        self.articles_tree.heading("Référence", text="Référence", anchor="w")
-        self.articles_tree.heading("Désignation", text="Désignation", anchor="w")
-        self.articles_tree.heading("PA", text="Prix Achat", anchor="e")
-        self.articles_tree.heading("PV", text="Prix Vente", anchor="e")
-        self.articles_tree.heading("TVA%", text="TVA%", anchor="center")
-        self.articles_tree.heading("Marge", text="Marge", anchor="e")
-        self.articles_tree.heading("Stock", text="Stock", anchor="center")
+        self.articles_tree.heading(t("articles.col_reference"), text=t("articles.heading_reference"), anchor="w")
+        self.articles_tree.heading(t("articles.col_designation"), text=t("articles.heading_designation"), anchor="w")
+        self.articles_tree.heading(t("articles.col_pa"), text=t("articles.heading_pa"), anchor="e")
+        self.articles_tree.heading(t("articles.col_pv"), text=t("articles.heading_pv"), anchor="e")
+        self.articles_tree.heading(t("articles.col_tva"), text=t("articles.heading_tva"), anchor="center")
+        self.articles_tree.heading(t("articles.col_margin"), text=t("articles.heading_margin"), anchor="e")
+        self.articles_tree.heading(t("articles.col_stock"), text=t("articles.heading_stock"), anchor="center")
 
         self.articles_tree.column("ID", width=60, anchor="center")
-        self.articles_tree.column("Référence", width=140, anchor="w")
-        self.articles_tree.column("Désignation", width=340, anchor="w")
-        self.articles_tree.column("PA", width=120, anchor="e")
-        self.articles_tree.column("PV", width=120, anchor="e")
-        self.articles_tree.column("TVA%", width=80, anchor="center")
-        self.articles_tree.column("Marge", width=120, anchor="e")
-        self.articles_tree.column("Stock", width=100, anchor="center")
+        self.articles_tree.column(t("articles.col_reference"), width=140, anchor="w")
+        self.articles_tree.column(t("articles.col_designation"), width=340, anchor="w")
+        self.articles_tree.column(t("articles.col_pa"), width=120, anchor="e")
+        self.articles_tree.column(t("articles.col_pv"), width=120, anchor="e")
+        self.articles_tree.column(t("articles.col_tva"), width=80, anchor="center")
+        self.articles_tree.column(t("articles.col_margin"), width=120, anchor="e")
+        self.articles_tree.column(t("articles.col_stock"), width=100, anchor="center")
 
         scrollbar = ttk.Scrollbar(
             frame, orient="vertical", command=self.articles_tree.yview
@@ -1147,7 +1229,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Add sorting functionality
         self.article_sort_state = {}  # Track sort state per column
-        columns = ("ID", "Référence", "Désignation", "PA", "PV", "TVA%", "Marge", "Stock")
+        columns = ("ID", t("articles.col_reference"), t("articles.col_designation"), t("articles.col_pa"), t("articles.col_pv"), t("articles.col_tva"), t("articles.col_margin"), t("articles.col_stock"))
         for col in columns:
             self.articles_tree.heading(col, command=lambda c=col: self.sort_articles(c))
         
@@ -1166,7 +1248,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Update all headers to show arrows
         arrow = "▲" if new_state else "▼"
-        all_cols = ["ID", "Référence", "Désignation", "PA", "PV", "TVA%", "Marge", "Stock"]
+        all_cols = ["ID", t("articles.col_reference"), t("articles.col_designation"), t("articles.col_pa"), t("articles.col_pv"), t("articles.col_tva"), t("articles.col_margin"), t("articles.col_stock")]
         for col in all_cols:
             if col == column:
                 self.articles_tree.heading(col, text=f"{col} {arrow}")
@@ -1181,13 +1263,13 @@ class MainApp(ctk.CTkToplevel):
         # Column index mapping
         col_index = {
             "ID": 0,
-            "Référence": 1,
-            "Désignation": 2,
-            "PA": 3,
-            "PV": 4,
-            "TVA%": 5,
-            "Marge": 6,
-            "Stock": 7,
+            t("articles.col_reference"): 1,
+            t("articles.col_designation"): 2,
+            t("articles.col_pa"): 3,
+            t("articles.col_pv"): 4,
+            t("articles.col_tva"): 5,
+            t("articles.col_margin"): 6,
+            t("articles.col_stock"): 7,
         }
         
         idx = col_index.get(column, 0)
@@ -1198,7 +1280,7 @@ class MainApp(ctk.CTkToplevel):
             val = values[idx]
             
             # Handle numeric columns
-            if column in ["ID", "PA", "PV", "TVA%", "Marge", "Stock"]:
+            if column in ["ID", t("articles.col_pa"), t("articles.col_pv"), t("articles.col_tva"), t("articles.col_margin"), t("articles.col_stock")]:
                 try:
                     return float(val)
                 except:
@@ -1220,24 +1302,24 @@ class MainApp(ctk.CTkToplevel):
 
     def delete_selected_article(self):
         if not hasattr(self, "articles_tree"):
-            messagebox.showerror("Erreur", "Aucune liste d'articles disponible")
+            messagebox.showerror(t("common.error"), t("articles.error_no_list"))
             return
         sel = self.articles_tree.selection()
         if not sel:
-            messagebox.showerror("Erreur", "Sélectionne un article à supprimer")
+            messagebox.showerror(t("common.error"), t("articles.error_select_to_delete"))
             return
         try:
             vals = self.articles_tree.item(sel[0], "values")
         except Exception:
-            messagebox.showerror("Erreur", "Impossible de lire la sélection")
+            messagebox.showerror(t("common.error"), t("articles.error_read_selection"))
             return
         if not vals:
-            messagebox.showerror("Erreur", "Sélectionne un article à supprimer")
+            messagebox.showerror(t("common.error"), t("articles.error_select_to_delete"))
             return
         try:
             article_id = int(vals[0])
         except Exception:
-            messagebox.showerror("Erreur", "ID article invalide")
+            messagebox.showerror(t("common.error"), t("articles.error_invalid_id"))
             return
 
         conn = sqlite3.connect(self.db_path)
@@ -1255,7 +1337,7 @@ class MainApp(ctk.CTkToplevel):
         try:
             if ref_count and ref_count > 0:
                 if not messagebox.askyesno(
-                    "Confirmer",
+                    t("common.confirm"),
                     f"Cet article est référencé dans {ref_count} ligne(s) de documents. Supprimer l'article ET les lignes associées ?",
                     icon="warning",
                 ):
@@ -1267,7 +1349,7 @@ class MainApp(ctk.CTkToplevel):
 
             else:
                 if not messagebox.askyesno(
-                    "Confirmer", "Supprimer l'article sélectionné ?"
+                    t("common.confirm"), t("articles.confirm_delete")
                 ):
                     return
 
@@ -1275,7 +1357,7 @@ class MainApp(ctk.CTkToplevel):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            messagebox.showerror("Erreur", f"Erreur lors de la suppression : {e}")
+            messagebox.showerror(t("common.error"), f"Erreur lors de la suppression : {e}")
             return
         finally:
             conn.close()
@@ -1290,7 +1372,7 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
 
-        messagebox.showinfo("Supprimé", "Article supprimé avec succès")
+        messagebox.showinfo(t("common.deleted"), t("articles.deleted_success"))
 
     def _update_article_delete_button(self):
         try:
@@ -1811,7 +1893,7 @@ class MainApp(ctk.CTkToplevel):
     def show_add_article_dialog(self, article_id=None):
         dialog = ctk.CTkToplevel(self)
         dialog.title(
-            "Ajouter un article" if article_id is None else "Modifier un article"
+            t("article_dialog.title_add") if article_id is None else t("article_dialog.title_edit")
         )
         dialog.geometry("980x700")
         try:
@@ -1851,7 +1933,7 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             header,
-            text="Fiche Article",
+            text=t("article_dialog.header"),
             font=self.ui["font_h1"],
         ).pack(side="left")
 
@@ -1860,7 +1942,7 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             actions,
-            text="Historique",
+            text=t("article_dialog.button_history"),
             state="disabled",
             fg_color="transparent",
             border_width=1,
@@ -1875,10 +1957,10 @@ class MainApp(ctk.CTkToplevel):
         right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="right")
 
-        ctk.CTkLabel(left, text="Référence", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("articles.col_reference"), font=self.ui["font_h2"]).grid(
             row=0, column=0, sticky="w"
         )
-        ctk.CTkLabel(left, text="Stock", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("articles.col_stock"), font=self.ui["font_h2"]).grid(
             row=0, column=1, sticky="w"
         )
 
@@ -1890,7 +1972,7 @@ class MainApp(ctk.CTkToplevel):
         stock_entry.insert(0, stock_value)
         stock_entry.grid(row=1, column=1, sticky="w", pady=(0, 8))
 
-        ctk.CTkLabel(left, text="Désignation", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("articles.col_designation"), font=self.ui["font_h2"]).grid(
             row=2, column=0, sticky="w", pady=(8, 0)
         )
 
@@ -1899,14 +1981,14 @@ class MainApp(ctk.CTkToplevel):
         des_entry.grid(row=3, column=0, columnspan=2, sticky="w")
 
         statut_label = ctk.CTkLabel(
-            right, text="Statut: Actif", font=self.ui["font_h2"]
+            right, text=t("article_dialog.status_active"), font=self.ui["font_h2"]
         )
         statut_label.pack(anchor="e")
 
         content = ctk.CTkFrame(dialog, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=(10, 10))
 
-        columns = ("Date", "Mouvement", "Qté", "Utilisateur")
+        columns = (t("article_dialog.col_date"), t("article_dialog.col_movement"), t("article_dialog.col_qty"), t("article_dialog.col_user"))
         lines_tree = ttk.Treeview(
             content, columns=columns, show="headings", selectmode="browse"
         )
@@ -1943,7 +2025,7 @@ class MainApp(ctk.CTkToplevel):
         pv_box.pack(side="right", padx=(0, 12))
         ctk.CTkLabel(
             pv_box,
-            text="Prix Vente",
+            text=t("articles.heading_pv"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -1957,7 +2039,7 @@ class MainApp(ctk.CTkToplevel):
         tva_box.pack(side="right", padx=(0, 12))
         ctk.CTkLabel(
             tva_box,
-            text="TVA %",
+            text=t("article_dialog.label_tva"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -1971,7 +2053,7 @@ class MainApp(ctk.CTkToplevel):
         pa_box.pack(side="right")
         ctk.CTkLabel(
             pa_box,
-            text="Prix Achat",
+            text=t("articles.heading_pa"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -1986,7 +2068,7 @@ class MainApp(ctk.CTkToplevel):
 
         add_btn = ctk.CTkButton(
             toolbar,
-            text="+ Mouvement Stock",
+            text=t("article_dialog.button_stock_movement"),
             state="disabled",
             fg_color="transparent",
             border_width=1,
@@ -2006,7 +2088,7 @@ class MainApp(ctk.CTkToplevel):
             stock = stock_entry.get().strip()
 
             if not designation:
-                messagebox.showerror("Erreur", "La désignation est obligatoire")
+                messagebox.showerror(t("common.error"), t("article_dialog.error_designation_required"))
                 return
 
             try:
@@ -2015,7 +2097,7 @@ class MainApp(ctk.CTkToplevel):
                 tva_f = float(tva) if tva else 0.0
                 stock_i = int(stock) if stock else 0
             except ValueError:
-                messagebox.showerror("Erreur", "Prix/Stock invalides")
+                messagebox.showerror(t("common.error"), t("article_dialog.error_price_stock_invalid"))
                 return
 
             conn = sqlite3.connect(self.db_path)
@@ -2048,12 +2130,12 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             footer,
-            text="Fermer",
+            text=t("common.close"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
-        ctk.CTkButton(footer, text="Enregistrer", command=save_article).pack(
+        ctk.CTkButton(footer, text=t("common.save"), command=save_article).pack(
             side="right"
         )
 
@@ -2082,31 +2164,31 @@ class MainApp(ctk.CTkToplevel):
         if key == "devis":
             ctk.CTkButton(
                 actions_left,
-                text="Convertir → BL",
+                text=t("documents.button_convert_devis_to_bl"),
                 command=lambda k=key: self.convert_selected_document(k, "bl"),
             ).pack(side="right", padx=(10, 0))
         elif key == "bl":
             ctk.CTkButton(
                 actions_left,
-                text="Convertir → Facture (BLV)",
+                text=t("documents.button_convert_bl_to_invoice"),
                 command=lambda k=key: self.convert_selected_document(k, "factures"),
             ).pack(side="right", padx=(10, 0))
             ctk.CTkButton(
                 actions_left,
-                text="Valider (sortie stock)",
+                text=t("documents.button_validate_bl"),
                 command=lambda k=key: self.validate_selected_document(k),
             ).pack(side="right", padx=(10, 0))
         elif key == "reception":
             ctk.CTkButton(
                 actions_left,
-                text="Valider (entrée stock)",
+                text=t("documents.button_validate_reception"),
                 command=lambda k=key: self.validate_selected_document(k),
             ).pack(side="right", padx=(10, 0))
 
         self.doc_delete_buttons = getattr(self, "doc_delete_buttons", {})
         del_btn = ctk.CTkButton(
             actions_left,
-            text="Supprimer",
+            text=t("common.delete"),
             command=lambda k=key: self.delete_selected_document(k),
             fg_color=self.ui.get("danger_fg", "#FF4B4B"),
             hover_color=self.ui.get("danger_hover", "#FF0000"),
@@ -2130,7 +2212,7 @@ class MainApp(ctk.CTkToplevel):
         container.pack(side="left", padx=(0, 10))
 
         self.document_search_entries[key] = ctk.CTkEntry(
-            container, width=350, placeholder_text="Rechercher..."
+            container, width=350, placeholder_text=t("documents.search_placeholder")
         )
         self.document_search_entries[key].pack(fill="x")
 
@@ -2147,7 +2229,7 @@ class MainApp(ctk.CTkToplevel):
         # Search button
         ctk.CTkButton(
             search_frame,
-            text="Rechercher",
+            text=t("common.search"),
             command=lambda k=key: self.search_documents(k),
         ).pack(side="left")
 
@@ -2174,13 +2256,13 @@ class MainApp(ctk.CTkToplevel):
 
         columns = (
             "ID",
-            "Numéro",
-            "Client",
-            "Date",
-            "Statut",
-            "HT",
-            "TVA",
-            "TTC",
+            t("client_dialog.col_number"),
+            t("documents.col_client"),
+            t("article_dialog.col_date"),
+            t("client_dialog.col_status"),
+            t("documents.col_ht"),
+            t("documents.col_tva"),
+            t("documents.col_ttc"),
         )
         tree = ttk.Treeview(
             frame, columns=columns, show="headings", selectmode="browse"
@@ -2189,11 +2271,11 @@ class MainApp(ctk.CTkToplevel):
             tree.heading(col, text=col)
             tree.column(col, width=140, anchor="center")
 
-        tree.column("Client", width=240, anchor="w")
-        tree.column("Date", width=140, anchor="center")
-        tree.column("HT", width=110, anchor="e")
-        tree.column("TVA", width=110, anchor="e")
-        tree.column("TTC", width=110, anchor="e")
+        tree.column(t("documents.col_client"), width=240, anchor="w")
+        tree.column(t("article_dialog.col_date"), width=140, anchor="center")
+        tree.column(t("documents.col_ht"), width=110, anchor="e")
+        tree.column(t("documents.col_tva"), width=110, anchor="e")
+        tree.column(t("documents.col_ttc"), width=110, anchor="e")
 
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         scrollbar.pack(side="right", fill="y")
@@ -2239,7 +2321,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Update all headers to show arrows
         arrow = "▲" if new_state else "▼"
-        all_cols = ["ID", "Numéro", "Client", "Date", "Statut", "HT", "TVA", "TTC"]
+        all_cols = ["ID", t("client_dialog.col_number"), t("documents.col_client"), t("article_dialog.col_date"), t("client_dialog.col_status"), t("documents.col_ht"), t("documents.col_tva"), t("documents.col_ttc")]
         for col in all_cols:
             if col == column:
                 tree.heading(col, text=f"{col} {arrow}")
@@ -2254,13 +2336,13 @@ class MainApp(ctk.CTkToplevel):
         # Column index mapping
         col_index = {
             "ID": 0,
-            "Numéro": 1,
-            "Client": 2,
-            "Date": 3,
-            "Statut": 4,
-            "HT": 5,
-            "TVA": 6,
-            "TTC": 7,
+            t("client_dialog.col_number"): 1,
+            t("documents.col_client"): 2,
+            t("article_dialog.col_date"): 3,
+            t("client_dialog.col_status"): 4,
+            t("documents.col_ht"): 5,
+            t("documents.col_tva"): 6,
+            t("documents.col_ttc"): 7,
         }
         
         idx = col_index.get(column, 0)
@@ -2271,7 +2353,7 @@ class MainApp(ctk.CTkToplevel):
             val = values[idx]
             
             # Handle numeric columns
-            if column in ["HT", "TVA", "TTC"]:
+            if column in [t("documents.col_ht"), t("documents.col_tva"), t("documents.col_ttc")]:
                 try:
                     return float(val)
                 except:
@@ -2283,7 +2365,7 @@ class MainApp(ctk.CTkToplevel):
                 except:
                     return 0
             # Handle date
-            elif column == "Date":
+            elif column == t("article_dialog.col_date"):
                 return str(val)
             # Handle text columns
             else:
@@ -2568,7 +2650,7 @@ class MainApp(ctk.CTkToplevel):
         top.pack(fill="x", padx=20, pady=15)
 
         numero = self.get_next_numero(doc_type)
-        ctk.CTkLabel(top, text=f"Numéro: {numero}", font=("Arial", 14, "bold")).pack(
+        ctk.CTkLabel(top, text=t("new_doc.label_number", number=numero), font=("Arial", 14, "bold")).pack(
             side="left"
         )
 
@@ -2583,7 +2665,7 @@ class MainApp(ctk.CTkToplevel):
 
         client_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         client_frame.pack(fill="x", padx=20)
-        ctk.CTkLabel(client_frame, text="Client").pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(client_frame, text=t("documents.col_client")).pack(side="left", padx=(0, 10))
         client_combo = ttk.Combobox(
             client_frame, values=client_names, state="readonly", width=40
         )
@@ -2592,7 +2674,7 @@ class MainApp(ctk.CTkToplevel):
         lines_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         lines_frame.pack(fill="both", expand=True, padx=20, pady=15)
 
-        columns = ("ArticleId", "Référence", "Article", "Quantité", "PU", "TVA%")
+        columns = ("ArticleId", t("articles.col_reference"), t("new_doc.col_article"), t("new_doc.col_qty"), t("new_doc.col_pu"), t("articles.col_tva"))
         lines_tree = ttk.Treeview(
             lines_frame, columns=columns, show="headings", selectmode="browse"
         )
@@ -2601,15 +2683,15 @@ class MainApp(ctk.CTkToplevel):
             if col == "ArticleId":
                 lines_tree.column(col, width=0, stretch=False)
                 lines_tree.heading(col, text="")
-            elif col == "Référence":
+            elif col == t("articles.col_reference"):
                 lines_tree.column(col, width=100, anchor="center")
-            elif col == "Article":
+            elif col == t("new_doc.col_article"):
                 lines_tree.column(col, width=200, anchor="w")
-            elif col == "Quantité":
+            elif col == t("new_doc.col_qty"):
                 lines_tree.column(col, width=80, anchor="center")
-            elif col == "PU":
+            elif col == t("new_doc.col_pu"):
                 lines_tree.column(col, width=100, anchor="center")
-            elif col == "TVA%":
+            elif col == t("articles.col_tva"):
                 lines_tree.column(col, width=80, anchor="center")
         lines_tree.pack(fill="both", expand=True)
 
@@ -2660,7 +2742,7 @@ class MainApp(ctk.CTkToplevel):
 
         def add_line():
             dlg = ctk.CTkToplevel(dialog)
-            dlg.title("Ajouter une ligne")
+            dlg.title(t("new_doc.line_dialog_title_add"))
             dlg.geometry("560x420")
             try:
                 dlg.transient(dialog)
@@ -2671,7 +2753,7 @@ class MainApp(ctk.CTkToplevel):
             header = ctk.CTkFrame(dlg, fg_color="transparent")
             header.pack(fill="x", padx=20, pady=(15, 10))
             ctk.CTkLabel(
-                header, text="Ajouter une ligne", font=self.ui["font_h2"]
+                header, text=t("new_doc.line_dialog_title_add"), font=self.ui["font_h2"]
             ).pack(side="left")
 
             form = ctk.CTkFrame(dlg, fg_color="transparent")
@@ -2692,7 +2774,7 @@ class MainApp(ctk.CTkToplevel):
             price_map = {a[1]: float(a[2] or 0) for a in articles}
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
-            ctk.CTkLabel(form, text="Article", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_article"), font=self.ui["font_body"]).grid(
                 row=0, column=0, columnspan=2, sticky="w"
             )
 
@@ -2706,7 +2788,7 @@ class MainApp(ctk.CTkToplevel):
             article_search_entry = ctk.CTkEntry(
                 article_search_container,
                 width=540,
-                placeholder_text="Rechercher un article...",
+                placeholder_text=t("articles.search_placeholder"),
             )
             article_search_entry.pack(fill="x")
 
@@ -2849,21 +2931,21 @@ class MainApp(ctk.CTkToplevel):
             )
             article_dropdown.bind("<Button-1>", lambda e: "break")
 
-            ctk.CTkLabel(form, text="Quantité", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_qty"), font=self.ui["font_body"]).grid(
                 row=2, column=0, sticky="w"
             )
             qty_var = ctk.StringVar(value="1")
             qty_entry = ctk.CTkEntry(form, textvariable=qty_var)
             qty_entry.grid(row=3, column=0, sticky="we", pady=(0, 10), padx=(0, 10))
 
-            ctk.CTkLabel(form, text="Prix unitaire", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.label_pu"), font=self.ui["font_body"]).grid(
                 row=2, column=1, sticky="w"
             )
             pu_var = ctk.StringVar(value="0")
             pu_entry = ctk.CTkEntry(form, textvariable=pu_var)
             pu_entry.grid(row=3, column=1, sticky="we", pady=(0, 10))
 
-            ctk.CTkLabel(form, text="TVA %", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("article_dialog.label_tva"), font=self.ui["font_body"]).grid(
                 row=4, column=0, sticky="w"
             )
             tva_var = ctk.StringVar(value="0")
@@ -2874,7 +2956,7 @@ class MainApp(ctk.CTkToplevel):
             preview.grid(row=5, column=1, sticky="we", pady=(0, 10))
             ctk.CTkLabel(
                 preview,
-                text="Aperçu",
+                text=t("new_doc.preview_heading"),
                 font=self.ui["font_body"],
                 text_color=("gray35", "gray70"),
             ).pack(anchor="w")
@@ -2919,14 +3001,14 @@ class MainApp(ctk.CTkToplevel):
             def save_line():
                 display_value = article_search_entry.get().strip()
                 if not display_value:
-                    messagebox.showerror("Erreur", "Choisis un article")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_choose_article"))
                     return
                 try:
                     qty = float(qty_entry.get().strip())
                     pu = float(pu_entry.get().strip())
                     tva = float(tva_entry.get().strip())
                 except ValueError:
-                    messagebox.showerror("Erreur", "Quantité / PU invalides")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_invalid"))
                     return
 
                 # Extract article ID and reference from display value (format: "ID - REF - Designation")
@@ -2956,17 +3038,17 @@ class MainApp(ctk.CTkToplevel):
             btns.pack(fill="x", padx=20, pady=(0, 15))
             ctk.CTkButton(
                 btns,
-                text="Annuler",
+                text=t("common.cancel"),
                 command=dlg.destroy,
                 fg_color="gray",
                 hover_color="darkgray",
             ).pack(side="right", padx=10)
-            ctk.CTkButton(btns, text="Ajouter", command=save_line).pack(side="right")
+            ctk.CTkButton(btns, text=t("common.add"), command=save_line).pack(side="right")
 
         def edit_line():
             sel = lines_tree.selection()
             if not sel:
-                messagebox.showerror("Erreur", "Sélectionne une ligne à modifier")
+                messagebox.showerror(t("common.error"), t("new_doc.error_select_line_edit"))
                 return
             item = sel[0]
             vals = lines_tree.item(item, "values")
@@ -2974,7 +3056,7 @@ class MainApp(ctk.CTkToplevel):
                 return
 
             dlg = ctk.CTkToplevel(dialog)
-            dlg.title("Modifier la ligne")
+            dlg.title(t("new_doc.button_edit_line"))
             dlg.geometry("560x520")
             try:
                 dlg.transient(dialog)
@@ -2985,7 +3067,7 @@ class MainApp(ctk.CTkToplevel):
             header = ctk.CTkFrame(dlg, fg_color="transparent")
             header.pack(fill="x", padx=20, pady=(15, 10))
             ctk.CTkLabel(
-                header, text="Modifier la ligne", font=self.ui["font_h2"]
+                header, text=t("new_doc.button_edit_line"), font=self.ui["font_h2"]
             ).pack(side="left")
 
             form = ctk.CTkFrame(dlg, fg_color="transparent")
@@ -3006,7 +3088,7 @@ class MainApp(ctk.CTkToplevel):
             price_map = {a[1]: float(a[2] or 0) for a in articles}
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
-            ctk.CTkLabel(form, text="Article", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_article"), font=self.ui["font_body"]).grid(
                 row=0, column=0, columnspan=2, sticky="w"
             )
 
@@ -3016,11 +3098,11 @@ class MainApp(ctk.CTkToplevel):
                 row=1, column=0, columnspan=2, sticky="we", pady=(0, 10)
             )
 
-            # Article search entry (like "Ajouter une ligne")
+            # Article search entry (like t("new_doc.line_dialog_title_add"))
             article_search_entry = ctk.CTkEntry(
                 article_search_container,
                 width=540,
-                placeholder_text="Rechercher un article...",
+                placeholder_text=t("articles.search_placeholder"),
             )
             article_search_entry.pack(fill="x")
 
@@ -3162,19 +3244,19 @@ class MainApp(ctk.CTkToplevel):
             )
             article_dropdown.bind("<Button-1>", lambda e: "break")
 
-            ctk.CTkLabel(form, text="Quantité", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_qty"), font=self.ui["font_body"]).grid(
                 row=2, column=0, sticky="w"
             )
             qty_entry = ctk.CTkEntry(form, width=20)
             qty_entry.grid(row=3, column=0, sticky="we", padx=(0, 6))
 
-            ctk.CTkLabel(form, text="PU", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_pu"), font=self.ui["font_body"]).grid(
                 row=2, column=1, sticky="w"
             )
             pu_entry = ctk.CTkEntry(form, width=20)
             pu_entry.grid(row=3, column=1, sticky="we")
 
-            ctk.CTkLabel(form, text="TVA%", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("articles.col_tva"), font=self.ui["font_body"]).grid(
                 row=4, column=0, sticky="w"
             )
             tva_entry = ctk.CTkEntry(form, width=20)
@@ -3207,7 +3289,7 @@ class MainApp(ctk.CTkToplevel):
             def save_edit():
                 display_value = article_search_entry.get().strip()
                 if not display_value:
-                    messagebox.showerror("Erreur", "Choisis un article")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_choose_article"))
                     return
                 
                 # Extract article ID and reference from display value (format: "ID - REF - Designation")
@@ -3239,7 +3321,7 @@ class MainApp(ctk.CTkToplevel):
                     conn.close()
 
                 if article_id is None:
-                    messagebox.showerror("Erreur", "Article invalide")
+                    messagebox.showerror(t("common.error"), "Article invalide")
                     return
 
                 try:
@@ -3247,7 +3329,7 @@ class MainApp(ctk.CTkToplevel):
                     pu = float(pu_entry.get().strip())
                     tva = float(tva_entry.get().strip())
                 except ValueError:
-                    messagebox.showerror("Erreur", "Quantité / PU / TVA invalides")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_tva_invalid"))
                     return
 
                 lines_tree.item(item, values=(article_id, reference, designation, qty, pu, tva))
@@ -3258,22 +3340,22 @@ class MainApp(ctk.CTkToplevel):
             btns.pack(fill="x", padx=20, pady=(0, 15))
             ctk.CTkButton(
                 btns,
-                text="Annuler",
+                text=t("common.cancel"),
                 command=dlg.destroy,
                 fg_color="gray",
                 hover_color="darkgray",
             ).pack(side="right", padx=10)
-            ctk.CTkButton(btns, text="Enregistrer", command=save_edit).pack(
+            ctk.CTkButton(btns, text=t("common.save"), command=save_edit).pack(
                 side="right"
             )
 
         def delete_line():
             sel = lines_tree.selection()
             if not sel:
-                messagebox.showerror("Erreur", "Sélectionne une ligne à supprimer")
+                messagebox.showerror(t("common.error"), t("new_doc.error_select_line_delete"))
                 return
             if not messagebox.askyesno(
-                "Confirmer", "Supprimer la ligne sélectionnée ?"
+                t("common.confirm"), t("new_doc.confirm_delete_line")
             ):
                 return
             for s in sel:
@@ -3283,16 +3365,16 @@ class MainApp(ctk.CTkToplevel):
         actions = ctk.CTkFrame(dialog, fg_color="transparent")
         actions.pack(fill="x", padx=20, pady=(0, 10))
         add_line_btn = ctk.CTkButton(
-            actions, text="+ Ajouter une ligne", command=add_line
+            actions, text=t("new_doc.button_add_line"), command=add_line
         )
         add_line_btn.pack(side="left")
         edit_line_btn = ctk.CTkButton(
-            actions, text="Modifier la ligne", command=edit_line, state="disabled"
+            actions, text=t("new_doc.button_edit_line"), command=edit_line, state="disabled"
         )
         edit_line_btn.pack(side="left", padx=(8, 0))
         del_line_btn = ctk.CTkButton(
             actions,
-            text="Supprimer la ligne",
+            text=t("new_doc.button_delete_line"),
             command=delete_line,
             fg_color=self.ui.get("danger_fg", "#FF4B4B"),
             hover_color=self.ui.get("danger_hover", "#FF0000"),
@@ -3321,7 +3403,7 @@ class MainApp(ctk.CTkToplevel):
         
         discount_enabled_var = ctk.BooleanVar(value=False)
         discount_checkbox = ctk.CTkCheckBox(
-            discount_frame, text="Remise %", variable=discount_enabled_var
+            discount_frame, text=t("new_doc.discount_checkbox"), variable=discount_enabled_var
         )
         discount_checkbox.pack(anchor="w")
         
@@ -3337,7 +3419,7 @@ class MainApp(ctk.CTkToplevel):
         discount_pct_frame.pack(fill="x")
         ctk.CTkLabel(
             discount_pct_frame,
-            text="Remise",
+            text=t("new_doc.discount_label"),
             font=("Arial", 10),
             text_color=("gray35", "gray70"),
         ).pack(side="left")
@@ -3353,7 +3435,7 @@ class MainApp(ctk.CTkToplevel):
         discount_amount_frame.pack(fill="x")
         ctk.CTkLabel(
             discount_amount_frame,
-            text="Montant",
+            text=t("new_doc.discount_amount_label"),
             font=("Arial", 10),
             text_color=("gray35", "gray70"),
         ).pack(side="left")
@@ -3389,7 +3471,7 @@ class MainApp(ctk.CTkToplevel):
         ttc_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             ttc_box,
-            text="TTC",
+            text=t("documents.col_ttc"),
             font=("Arial", 10),
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3402,7 +3484,7 @@ class MainApp(ctk.CTkToplevel):
         tva_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             tva_box,
-            text="TVA",
+            text=t("documents.col_tva"),
             font=("Arial", 10),
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3415,7 +3497,7 @@ class MainApp(ctk.CTkToplevel):
         ht_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             ht_box,
-            text="HT",
+            text=t("documents.col_ht"),
             font=("Arial", 10),
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3521,12 +3603,12 @@ class MainApp(ctk.CTkToplevel):
         btn_frame.pack(fill="x", padx=20, pady=10)
         ctk.CTkButton(
             btn_frame,
-            text="Annuler",
+            text=t("common.cancel"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
-        ctk.CTkButton(btn_frame, text="Enregistrer", command=save_document).pack(
+        ctk.CTkButton(btn_frame, text=t("common.save"), command=save_document).pack(
             side="right"
         )
 
@@ -3559,7 +3641,7 @@ class MainApp(ctk.CTkToplevel):
             )
             doc = cursor.fetchone()
             if not doc:
-                messagebox.showerror("Erreur", "Document introuvable")
+                messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                 return
 
             cursor.execute("SELECT id, nom FROM clients ORDER BY nom")
@@ -3600,14 +3682,14 @@ class MainApp(ctk.CTkToplevel):
         ) = doc
 
         title = {
-            "devis": "Devis",
-            "bl": "Bon de livraison",
-            "factures": "Facture",
-            "reception": "Bon de réception",
+            "devis": t("nav.devis"),
+            "bl": t("nav.bl"),
+            "factures": t("doc_type.factures"),
+            "reception": t("nav.reception"),
         }.get(doc_type, doc_type)
 
         dialog = ctk.CTkToplevel(self)
-        dialog.title(f"Détails {title} - {numero}")
+        dialog.title(t("doc_details.dialog_title", title=title, number=numero))
         dialog.geometry("980x800")
         try:
             dialog.transient(self)
@@ -3626,7 +3708,7 @@ class MainApp(ctk.CTkToplevel):
         actions.pack(side="right")
         ctk.CTkButton(
             actions,
-            text="Exporter / Imprimer",
+            text=t("doc_details.button_export_print"),
             command=lambda: self.show_export_dialog_for_document(document_id),
         ).pack(side="right")
 
@@ -3638,21 +3720,21 @@ class MainApp(ctk.CTkToplevel):
         right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="right")
 
-        ctk.CTkLabel(left, text="Numéro", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("client_dialog.col_number"), font=self.ui["font_h2"]).grid(
             row=0, column=0, sticky="w"
         )
         numero_entry = ctk.CTkEntry(left, width=220)
         numero_entry.insert(0, str(numero or ""))
         numero_entry.grid(row=1, column=0, sticky="w", pady=(0, 8), padx=(0, 16))
 
-        ctk.CTkLabel(left, text="Date", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("article_dialog.col_date"), font=self.ui["font_h2"]).grid(
             row=0, column=1, sticky="w"
         )
         date_entry = ctk.CTkEntry(left, width=220)
         date_entry.insert(0, str(date_str or ""))
         date_entry.grid(row=1, column=1, sticky="w", pady=(0, 8))
 
-        ctk.CTkLabel(left, text="Client", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("documents.col_client"), font=self.ui["font_h2"]).grid(
             row=2, column=0, sticky="w", pady=(8, 0)
         )
         client_names = [c[1] for c in clients]
@@ -3674,7 +3756,7 @@ class MainApp(ctk.CTkToplevel):
         if is_locked:
             ctk.CTkLabel(
                 right,
-                text="(Document validé: modification verrouillée)",
+                text=t("doc_details.locked_notice"),
                 font=self.ui["font_body"],
                 text_color=("#B91C1C", "#EF4444"),
             ).pack(anchor="e", pady=(2, 0))
@@ -3682,7 +3764,7 @@ class MainApp(ctk.CTkToplevel):
         content = ctk.CTkFrame(dialog, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=(10, 10))
 
-        columns = ("ArticleId", "Référence", "Désignation", "Qté", "PU", "TVA%")
+        columns = ("ArticleId", t("articles.col_reference"), t("articles.col_designation"), t("article_dialog.col_qty"), t("new_doc.col_pu"), t("articles.col_tva"))
         lines_tree = ttk.Treeview(
             content, columns=columns, show="headings", selectmode="browse"
         )
@@ -3691,15 +3773,15 @@ class MainApp(ctk.CTkToplevel):
             if col == "ArticleId":
                 lines_tree.column(col, width=0, stretch=False)
                 lines_tree.heading(col, text="")
-            elif col == "Référence":
+            elif col == t("articles.col_reference"):
                 lines_tree.column(col, width=100, anchor="center")
-            elif col == "Désignation":
+            elif col == t("articles.col_designation"):
                 lines_tree.column(col, width=320, anchor="w")
-            elif col == "Qté":
+            elif col == t("article_dialog.col_qty"):
                 lines_tree.column(col, width=80, anchor="e")
-            elif col == "PU":
+            elif col == t("new_doc.col_pu"):
                 lines_tree.column(col, width=100, anchor="e")
-            elif col == "TVA%":
+            elif col == t("articles.col_tva"):
                 lines_tree.column(col, width=80, anchor="e")
 
         scrollbar = ttk.Scrollbar(content, orient="vertical", command=lines_tree.yview)
@@ -3733,12 +3815,12 @@ class MainApp(ctk.CTkToplevel):
         payment_frame.pack(side="left", padx=(0, 20))
 
         ctk.CTkLabel(
-            payment_frame, text="Enregistrer paiement", font=self.ui.get("font_body")
+            payment_frame, text=t("doc_details.payment_heading"), font=self.ui.get("font_body")
         ).pack(anchor="w")
-        pay_entry = ctk.CTkEntry(payment_frame, width=140, placeholder_text="Montant")
+        pay_entry = ctk.CTkEntry(payment_frame, width=140, placeholder_text=t("new_doc.discount_amount_label"))
         pay_entry.pack(anchor="w", pady=(4, 6))
         pay_method = ctk.CTkEntry(
-            payment_frame, width=140, placeholder_text="Méthode (opt)"
+            payment_frame, width=140, placeholder_text=t("doc_details.payment_method_placeholder")
         )
         pay_method.pack(anchor="w")
 
@@ -3748,7 +3830,7 @@ class MainApp(ctk.CTkToplevel):
         
         discount_enabled_var = ctk.BooleanVar(value=bool(discount_enabled))
         discount_checkbox = ctk.CTkCheckBox(
-            discount_frame, text="Remise %", variable=discount_enabled_var
+            discount_frame, text=t("new_doc.discount_checkbox"), variable=discount_enabled_var
         )
         discount_checkbox.pack(anchor="w")
         
@@ -3792,7 +3874,7 @@ class MainApp(ctk.CTkToplevel):
         discount_pct_frame.pack(fill="x")
         ctk.CTkLabel(
             discount_pct_frame,
-            text="Remise",
+            text=t("new_doc.discount_label"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(side="left")
@@ -3808,7 +3890,7 @@ class MainApp(ctk.CTkToplevel):
         discount_amount_frame.pack(fill="x")
         ctk.CTkLabel(
             discount_amount_frame,
-            text="Montant",
+            text=t("new_doc.discount_amount_label"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(side="left")
@@ -3828,7 +3910,7 @@ class MainApp(ctk.CTkToplevel):
         ttc_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             ttc_box,
-            text="TTC",
+            text=t("documents.col_ttc"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3841,7 +3923,7 @@ class MainApp(ctk.CTkToplevel):
         tva_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             tva_box,
-            text="TVA",
+            text=t("documents.col_tva"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3854,7 +3936,7 @@ class MainApp(ctk.CTkToplevel):
         ht_box.pack(side="right", padx=(0, 20))
         ctk.CTkLabel(
             ht_box,
-            text="HT",
+            text=t("documents.col_ht"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -3926,30 +4008,30 @@ class MainApp(ctk.CTkToplevel):
 
         def show_add_payment_dialog_for_selected(self):
             if not hasattr(self, "client_docs_tree"):
-                messagebox.showerror("Erreur", "Aucun document sélectionné")
+                messagebox.showerror(t("common.error"), t("payment_dialog.error_no_doc_selected"))
                 return
             sel = self.client_docs_tree.selection()
             if not sel:
-                messagebox.showerror("Erreur", "Sélectionne un document")
+                messagebox.showerror(t("common.error"), t("documents.error_select"))
                 return
             vals = self.client_docs_tree.item(sel[0], "values")
             if not vals:
-                messagebox.showerror("Erreur", "Sélectionne un document")
+                messagebox.showerror(t("common.error"), t("documents.error_select"))
                 return
             doc_id = int(vals[0])
             self.show_add_payment_dialog_for(doc_id)
 
         def mark_selected_document_paid_full(self):
             if not hasattr(self, "client_docs_tree"):
-                messagebox.showerror("Erreur", "Aucun document sélectionné")
+                messagebox.showerror(t("common.error"), t("payment_dialog.error_no_doc_selected"))
                 return
             sel = self.client_docs_tree.selection()
             if not sel:
-                messagebox.showerror("Erreur", "Sélectionne un document")
+                messagebox.showerror(t("common.error"), t("documents.error_select"))
                 return
             vals = self.client_docs_tree.item(sel[0], "values")
             if not vals:
-                messagebox.showerror("Erreur", "Sélectionne un document")
+                messagebox.showerror(t("common.error"), t("documents.error_select"))
                 return
             doc_id = int(vals[0])
 
@@ -3962,7 +4044,7 @@ class MainApp(ctk.CTkToplevel):
                 )
                 row = cursor.fetchone()
                 if not row:
-                    messagebox.showerror("Erreur", "Document introuvable")
+                    messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                     return
                 total_ttc = float(row[0] or 0)
                 paid = float(row[1] or 0)
@@ -4004,9 +4086,9 @@ class MainApp(ctk.CTkToplevel):
             header.pack(fill="x", padx=20, pady=(15, 10))
             ctk.CTkLabel(
                 header,
-                text="Modifier une ligne"
+                text=t("new_doc.line_dialog_title_edit")
                 if item_id is not None
-                else "Ajouter une ligne",
+                else t("new_doc.line_dialog_title_add"),
                 font=self.ui["font_h2"],
             ).pack(side="left")
 
@@ -4050,7 +4132,7 @@ class MainApp(ctk.CTkToplevel):
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
             ctk.CTkLabel(
-                form, text="Article (optionnel)", font=self.ui["font_body"]
+                form, text=t("new_doc.label_article_optional"), font=self.ui["font_body"]
             ).grid(row=0, column=0, columnspan=2, sticky="w")
 
             # Container for article search entry and dropdown
@@ -4063,7 +4145,7 @@ class MainApp(ctk.CTkToplevel):
             article_search_entry = ctk.CTkEntry(
                 article_search_container,
                 width=540,
-                placeholder_text="Rechercher un article...",
+                placeholder_text=t("articles.search_placeholder"),
             )
             article_search_entry.pack(fill="x")
 
@@ -4206,28 +4288,28 @@ class MainApp(ctk.CTkToplevel):
             )
             article_dropdown.bind("<Button-1>", lambda e: "break")
 
-            ctk.CTkLabel(form, text="Désignation", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("articles.col_designation"), font=self.ui["font_body"]).grid(
                 row=2, column=0, columnspan=2, sticky="w"
             )
             des_entry = ctk.CTkEntry(form)
             des_entry.insert(0, current["designation"])
             des_entry.grid(row=3, column=0, columnspan=2, sticky="we", pady=(0, 10))
 
-            ctk.CTkLabel(form, text="Quantité", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.col_qty"), font=self.ui["font_body"]).grid(
                 row=4, column=0, sticky="w"
             )
             qty_var = ctk.StringVar(value=current["qty"])
             qty_entry = ctk.CTkEntry(form, textvariable=qty_var)
             qty_entry.grid(row=5, column=0, sticky="we", pady=(0, 10), padx=(0, 10))
 
-            ctk.CTkLabel(form, text="Prix unitaire", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("new_doc.label_pu"), font=self.ui["font_body"]).grid(
                 row=4, column=1, sticky="w"
             )
             pu_var = ctk.StringVar(value=current["pu"])
             pu_entry = ctk.CTkEntry(form, textvariable=pu_var)
             pu_entry.grid(row=5, column=1, sticky="we", pady=(0, 10))
 
-            ctk.CTkLabel(form, text="TVA %", font=self.ui["font_body"]).grid(
+            ctk.CTkLabel(form, text=t("article_dialog.label_tva"), font=self.ui["font_body"]).grid(
                 row=6, column=0, sticky="w"
             )
             tva_var = ctk.StringVar(value=current["tva"])
@@ -4238,7 +4320,7 @@ class MainApp(ctk.CTkToplevel):
             preview.grid(row=7, column=1, sticky="we", pady=(0, 10))
             ctk.CTkLabel(
                 preview,
-                text="Aperçu",
+                text=t("new_doc.preview_heading"),
                 font=self.ui["font_body"],
                 text_color=("gray35", "gray70"),
             ).pack(anchor="w")
@@ -4283,14 +4365,14 @@ class MainApp(ctk.CTkToplevel):
             def save_line():
                 des = des_entry.get().strip()
                 if not des:
-                    messagebox.showerror("Erreur", "La désignation est obligatoire")
+                    messagebox.showerror(t("common.error"), t("article_dialog.error_designation_required"))
                     return
                 try:
                     qty_f = float(qty_entry.get().strip())
                     pu_f = float(pu_entry.get().strip())
                     tva_f = float(tva_entry.get().strip())
                 except ValueError:
-                    messagebox.showerror("Erreur", "Quantité / PU / TVA invalides")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_tva_invalid"))
                     return
 
                 # Get article info from search entry (format: "ID - REF - Designation")
@@ -4324,12 +4406,12 @@ class MainApp(ctk.CTkToplevel):
             btns.pack(fill="x", padx=20, pady=(0, 15))
             ctk.CTkButton(
                 btns,
-                text="Annuler",
+                text=t("common.cancel"),
                 command=dlg.destroy,
                 fg_color="gray",
                 hover_color="darkgray",
             ).pack(side="right", padx=10)
-            ctk.CTkButton(btns, text="Enregistrer", command=save_line).pack(
+            ctk.CTkButton(btns, text=t("common.save"), command=save_line).pack(
                 side="right"
             )
 
@@ -4341,7 +4423,7 @@ class MainApp(ctk.CTkToplevel):
         def edit_line():
             item_id = _get_selected_line_item()
             if not item_id:
-                messagebox.showerror("Erreur", "Sélectionne une ligne")
+                messagebox.showerror(t("common.error"), t("doc_details.error_select_line"))
                 return
             open_line_editor(item_id)
 
@@ -4350,9 +4432,9 @@ class MainApp(ctk.CTkToplevel):
                 return
             item_id = _get_selected_line_item()
             if not item_id:
-                messagebox.showerror("Erreur", "Sélectionne une ligne")
+                messagebox.showerror(t("common.error"), t("doc_details.error_select_line"))
                 return
-            if not messagebox.askyesno("Supprimer", "Supprimer cette ligne ?"):
+            if not messagebox.askyesno(t("common.delete"), t("doc_details.confirm_delete_line")):
                 return
             lines_tree.delete(item_id)
             self._apply_zebra(lines_tree)
@@ -4365,7 +4447,7 @@ class MainApp(ctk.CTkToplevel):
             new_numero = numero_entry.get().strip()
             new_date = date_entry.get().strip()
             if not new_numero:
-                messagebox.showerror("Erreur", "Le numéro est obligatoire")
+                messagebox.showerror(t("common.error"), t("doc_details.error_number_required"))
                 return
 
             client_name = client_combo.get().strip()
@@ -4410,7 +4492,7 @@ class MainApp(ctk.CTkToplevel):
                 row = cur3.fetchone()
                 if row and row[0] == "valide":
                     messagebox.showerror(
-                        "Erreur", "Document déjà validé. Modification impossible."
+                        t("common.error"), t("doc_details.error_already_validated")
                     )
                     return
 
@@ -4524,15 +4606,15 @@ class MainApp(ctk.CTkToplevel):
         toolbar.pack(fill="x", padx=20, pady=(0, 10))
         
         # Left side - line action buttons
-        add_btn = ctk.CTkButton(toolbar, text="+ Ajouter ligne", command=add_line)
+        add_btn = ctk.CTkButton(toolbar, text=t("doc_details.button_add_line"), command=add_line)
         add_btn.pack(side="left")
-        edit_btn = ctk.CTkButton(toolbar, text="Modifier ligne", command=edit_line)
+        edit_btn = ctk.CTkButton(toolbar, text=t("doc_details.button_edit_line"), command=edit_line)
         edit_btn.pack(side="left", padx=10)
-        add_btn.configure(text="+ Ajouter ligne")
-        edit_btn.configure(text="Modifier ligne")
+        add_btn.configure(text=t("doc_details.button_add_line"))
+        edit_btn.configure(text=t("doc_details.button_edit_line"))
         del_btn = ctk.CTkButton(
             toolbar,
-            text="Supprimer ligne",
+            text=t("doc_details.button_delete_line"),
             command=delete_line,
             fg_color=self.ui["danger_fg"],
             hover_color=self.ui["danger_hover"],
@@ -4542,13 +4624,13 @@ class MainApp(ctk.CTkToplevel):
         # Right side - save and close buttons
         ctk.CTkButton(
             toolbar,
-            text="Fermer",
+            text=t("common.close"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=(10, 0))
         save_btn = ctk.CTkButton(
-            toolbar, text="Enregistrer", command=save_document_changes
+            toolbar, text=t("common.save"), command=save_document_changes
         )
         save_btn.pack(side="right")
 
@@ -4594,7 +4676,7 @@ class MainApp(ctk.CTkToplevel):
     def convert_selected_document(self, from_type, to_type):
         doc_id = self._get_selected_doc_id_from_type(from_type)
         if not doc_id:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
 
         conn = sqlite3.connect(self.db_path)
@@ -4614,10 +4696,10 @@ class MainApp(ctk.CTkToplevel):
                 return
 
             if to_type == "bl" and doc[1] != "devis":
-                messagebox.showerror("Erreur", "Conversion uniquement Devis → BL")
+                messagebox.showerror(t("common.error"), t("documents.error_convert_devis_only"))
                 return
             if to_type == "factures" and doc[1] != "bl":
-                messagebox.showerror("Erreur", "Conversion uniquement BL → Facture")
+                messagebox.showerror(t("common.error"), t("documents.error_convert_bl_only"))
                 return
 
             new_numero = self.get_next_numero(to_type)
@@ -4694,7 +4776,7 @@ class MainApp(ctk.CTkToplevel):
     def validate_selected_document(self, doc_type):
         doc_id = self._get_selected_doc_id_from_type(doc_type)
         if not doc_id:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
 
         conn = sqlite3.connect(self.db_path)
@@ -4706,7 +4788,7 @@ class MainApp(ctk.CTkToplevel):
                 return
             dtype, statut = row
             if statut == "valide":
-                messagebox.showinfo("Validation", "Ce document est déjà validé")
+                messagebox.showinfo("Validation", t("documents.already_validated"))
                 return
 
             if dtype == "reception":
@@ -4744,7 +4826,7 @@ class MainApp(ctk.CTkToplevel):
                         stock = 0
                     if stock < needed:
                         raise ValueError(
-                            f"Stock insuffisant pour '{designation}': stock={stock}, demandé={needed}"
+                            t("documents.error_insufficient_stock", name=designation, stock=str(stock), required=str(needed))
                         )
 
                 cursor.execute(
@@ -4765,7 +4847,7 @@ class MainApp(ctk.CTkToplevel):
             conn.commit()
         except ValueError as e:
             conn.rollback()
-            messagebox.showerror("Stock", str(e))
+            messagebox.showerror(t("articles.col_stock"), str(e))
             return
         finally:
             conn.close()
@@ -4773,14 +4855,14 @@ class MainApp(ctk.CTkToplevel):
         self.load_documents(doc_type)
         self.load_paiements()
         self.load_articles()
-        messagebox.showinfo("Validation", "Document validé")
+        messagebox.showinfo("Validation", t("documents.validated_success"))
 
     def create_paiements_frame(self):
         frame = ctk.CTkFrame(self.main_frame, corner_radius=0, fg_color="transparent")
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkLabel(header, text="Paiements / Impayés", font=self.ui["font_h1"]).pack(
+        ctk.CTkLabel(header, text=t("paiements.header_title"), font=self.ui["font_h1"]).pack(
             side="left"
         )
 
@@ -4793,7 +4875,7 @@ class MainApp(ctk.CTkToplevel):
         right = ctk.CTkFrame(container, fg_color="transparent")
         right.pack(side="right", fill="both", expand=True, pady=6)
 
-        ctk.CTkLabel(left, text="Clients (impayés)", font=self.ui.get("font_h2")).pack(
+        ctk.CTkLabel(left, text=t("paiements.clients_unpaid_heading"), font=self.ui.get("font_h2")).pack(
             anchor="w", pady=(0, 8)
         )
 
@@ -4809,7 +4891,7 @@ class MainApp(ctk.CTkToplevel):
         self.paiements_client_search = ctk.CTkEntry(
             self.paiements_client_search_container,
             width=250,
-            placeholder_text="Rechercher client...",
+            placeholder_text=t("paiements.search_client_placeholder"),
         )
         self.paiements_client_search.pack(fill="x")
 
@@ -4825,7 +4907,7 @@ class MainApp(ctk.CTkToplevel):
         # Search button
         ctk.CTkButton(
             client_search_frame,
-            text="Rechercher",
+            text=t("common.search"),
             command=self.search_paiements_clients,
         ).pack(side="left", padx=(4, 0))
 
@@ -4842,16 +4924,16 @@ class MainApp(ctk.CTkToplevel):
         )
         self.paiements_client_dropdown.bind("<Button-1>", lambda e: "break")
 
-        client_cols = ("ClientID", "Client", "Impayé")
+        client_cols = ("ClientID", t("documents.col_client"), "Impayé")
         self.clients_unpaid_tree = ttk.Treeview(
             left, columns=client_cols, show="headings", selectmode="browse", height=20
         )
         for c in client_cols:
             self.clients_unpaid_tree.heading(
-                c, text=c if c != "Impayé" else "Impayé (€)"
+                c, text=c if c != "Impayé" else t("paiements.col_unpaid")
             )
             self.clients_unpaid_tree.column(c, width=100, anchor="center")
-        self.clients_unpaid_tree.column("Client", width=180, anchor="w")
+        self.clients_unpaid_tree.column(t("documents.col_client"), width=180, anchor="w")
         self.clients_unpaid_tree.pack(fill="y", expand=True)
         client_scroll = ttk.Scrollbar(
             left, orient="vertical", command=self.clients_unpaid_tree.yview
@@ -4862,10 +4944,10 @@ class MainApp(ctk.CTkToplevel):
         clients_actions = ctk.CTkFrame(left, fg_color="transparent")
         clients_actions.pack(fill="x", pady=(8, 0))
         ctk.CTkButton(
-            clients_actions, text="Rafraîchir", command=self.load_paiements
+            clients_actions, text=t("paiements.button_refresh"), command=self.load_paiements
         ).pack(side="left")
 
-        ctk.CTkLabel(right, text="Documents impayés", font=self.ui.get("font_h2")).pack(
+        ctk.CTkLabel(right, text=t("paiements.docs_unpaid_heading"), font=self.ui.get("font_h2")).pack(
             anchor="w", pady=(0, 8)
         )
 
@@ -4881,7 +4963,7 @@ class MainApp(ctk.CTkToplevel):
         self.paiements_doc_search = ctk.CTkEntry(
             self.paiements_doc_search_container,
             width=250,
-            placeholder_text="Rechercher document...",
+            placeholder_text=t("paiements.search_doc_placeholder"),
         )
         self.paiements_doc_search.pack(fill="x")
 
@@ -4896,7 +4978,7 @@ class MainApp(ctk.CTkToplevel):
 
         # Search button
         ctk.CTkButton(
-            doc_search_frame, text="Rechercher", command=self.search_paiements_docs
+            doc_search_frame, text=t("common.search"), command=self.search_paiements_docs
         ).pack(side="left", padx=(4, 0))
 
         # Bind autocomplete events
@@ -4912,15 +4994,15 @@ class MainApp(ctk.CTkToplevel):
         )
         self.paiements_doc_dropdown.bind("<Button-1>", lambda e: "break")
 
-        doc_cols = ("ID", "Numéro", "Type", "TTC", "Payé", "Reste")
+        doc_cols = ("ID", t("client_dialog.col_number"), t("client_dialog.col_type"), t("documents.col_ttc"), t("common.paid"), t("paiements.col_remaining"))
         self.client_docs_tree = ttk.Treeview(
             right, columns=doc_cols, show="headings", selectmode="browse"
         )
         for c in doc_cols:
             self.client_docs_tree.heading(c, text=c)
             self.client_docs_tree.column(c, width=120, anchor="center")
-        self.client_docs_tree.column("Numéro", width=140, anchor="w")
-        self.client_docs_tree.column("Type", width=100, anchor="center")
+        self.client_docs_tree.column(t("client_dialog.col_number"), width=140, anchor="w")
+        self.client_docs_tree.column(t("client_dialog.col_type"), width=100, anchor="center")
         self.client_docs_tree.pack(fill="both", expand=True)
         doc_scroll = ttk.Scrollbar(
             right, orient="vertical", command=self.client_docs_tree.yview
@@ -4932,12 +5014,12 @@ class MainApp(ctk.CTkToplevel):
         doc_actions.pack(fill="x", pady=(8, 0))
         ctk.CTkButton(
             doc_actions,
-            text="Enregistrer un paiement",
+            text=t("paiements.button_record_payment"),
             command=lambda: self.show_add_payment_dialog_for_selected(),
         ).pack(side="left")
         ctk.CTkButton(
             doc_actions,
-            text="Marquer payé (document)",
+            text=t("paiements.button_mark_paid"),
             command=lambda: self.mark_selected_document_paid_full(),
         ).pack(side="left", padx=8)
 
@@ -4949,12 +5031,12 @@ class MainApp(ctk.CTkToplevel):
         self.paiements_sort_state = {}  # Track sort state per tree and column
         
         # Clients unpaid tree sorting
-        client_cols = ("ClientID", "Client", "Impayé")
+        client_cols = ("ClientID", t("documents.col_client"), "Impayé")
         for col in client_cols:
             self.clients_unpaid_tree.heading(col, command=lambda c=col: self.sort_paiements_clients(c))
         
         # Documents tree sorting
-        doc_cols = ("ID", "Numéro", "Type", "TTC", "Payé", "Reste")
+        doc_cols = ("ID", t("client_dialog.col_number"), t("client_dialog.col_type"), t("documents.col_ttc"), t("common.paid"), t("paiements.col_remaining"))
         for col in doc_cols:
             self.client_docs_tree.heading(col, command=lambda c=col: self.sort_paiements_docs(c))
 
@@ -4978,7 +5060,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Update all headers to show arrows
         arrow = "▲" if new_state else "▼"
-        all_cols = ["ClientID", "Client", "Impayé"]
+        all_cols = ["ClientID", t("documents.col_client"), "Impayé"]
         for col in all_cols:
             if col == column:
                 self.clients_unpaid_tree.heading(col, text=f"{col} {arrow}")
@@ -4995,7 +5077,7 @@ class MainApp(ctk.CTkToplevel):
             items.append((values, item, tags))
         
         # Column index
-        col_index = {"ClientID": 0, "Client": 1, "Impayé": 2}
+        col_index = {"ClientID": 0, t("documents.col_client"): 1, "Impayé": 2}
         idx = col_index.get(column, 0)
         
         def sort_key(item):
@@ -5007,8 +5089,8 @@ class MainApp(ctk.CTkToplevel):
                 except:
                     return 0
             elif column == "Impayé":
-                # Handle "Payé" text
-                if val == "Payé":
+                # Handle t("common.paid") text
+                if val == t("common.paid"):
                     return 0.0
                 try:
                     return float(val)
@@ -5045,13 +5127,13 @@ class MainApp(ctk.CTkToplevel):
         items = [(self.client_docs_tree.item(item, "values"), item) for item in self.client_docs_tree.get_children()]
         
         # Column index
-        col_index = {"ID": 0, "Numéro": 1, "Type": 2, "TTC": 3, "Payé": 4, "Reste": 5}
+        col_index = {"ID": 0, t("client_dialog.col_number"): 1, t("client_dialog.col_type"): 2, t("documents.col_ttc"): 3, t("common.paid"): 4, t("paiements.col_remaining"): 5}
         idx = col_index.get(column, 0)
         
         def sort_key(item):
             values = item[0]
             val = values[idx]
-            if column in ["ID", "TTC", "Payé", "Reste"]:
+            if column in ["ID", t("documents.col_ttc"), t("common.paid"), t("paiements.col_remaining")]:
                 try:
                     return float(val)
                 except:
@@ -5096,7 +5178,7 @@ class MainApp(ctk.CTkToplevel):
                 
                 # Determine display text and tag based on unpaid amount
                 if unpaid <= 0:
-                    unpaid_text = "Payé"
+                    unpaid_text = t("common.paid")
                     tag = "paid"
                 else:
                     unpaid_text = f"{unpaid:.2f}"
@@ -5158,7 +5240,7 @@ class MainApp(ctk.CTkToplevel):
                 
                 # Determine tag based on remainder
                 if reste <= 0:
-                    reste_text = "Payé"
+                    reste_text = t("common.paid")
                     tag = "paid"
                 else:
                     reste_text = f"{reste:.2f}"
@@ -5272,7 +5354,7 @@ class MainApp(ctk.CTkToplevel):
                 
                 # Determine display text and tag based on unpaid amount
                 if unpaid <= 0:
-                    unpaid_text = "Payé"
+                    unpaid_text = t("common.paid")
                     tag = "paid"
                 else:
                     unpaid_text = f"{unpaid:.2f}"
@@ -5400,7 +5482,7 @@ class MainApp(ctk.CTkToplevel):
                 
                 # Determine tag based on remainder
                 if reste <= 0:
-                    reste_text = "Payé"
+                    reste_text = t("common.paid")
                     tag = "paid"
                 else:
                     reste_text = f"{reste:.2f}"
@@ -5440,39 +5522,39 @@ class MainApp(ctk.CTkToplevel):
 
     def show_add_payment_dialog_for_selected(self):
         if not hasattr(self, "client_docs_tree"):
-            messagebox.showerror("Erreur", "Aucun document sélectionné")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_no_doc_selected"))
             return
         sel = self.client_docs_tree.selection()
         if not sel:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         vals = self.client_docs_tree.item(sel[0], "values")
         if not vals:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         try:
             doc_id = int(vals[0])
         except Exception:
-            messagebox.showerror("Erreur", "ID de document invalide")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_doc_id"))
             return
         self.show_add_payment_dialog_for(doc_id)
 
     def mark_selected_document_paid_full(self):
         if not hasattr(self, "client_docs_tree"):
-            messagebox.showerror("Erreur", "Aucun document sélectionné")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_no_doc_selected"))
             return
         sel = self.client_docs_tree.selection()
         if not sel:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         vals = self.client_docs_tree.item(sel[0], "values")
         if not vals:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         try:
             doc_id = int(vals[0])
         except Exception:
-            messagebox.showerror("Erreur", "ID de document invalide")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_doc_id"))
             return
 
         preserved_client_id = None
@@ -5495,7 +5577,7 @@ class MainApp(ctk.CTkToplevel):
             )
             row = cursor.fetchone()
             if not row:
-                messagebox.showerror("Erreur", "Document introuvable")
+                messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                 return
             total_ttc = float(row[0] or 0)
             paid = float(row[1] or 0)
@@ -5571,7 +5653,7 @@ class MainApp(ctk.CTkToplevel):
     def mark_invoice_paid_full(self):
         doc_id = self._get_selected_invoice_id()
         if not doc_id:
-            messagebox.showerror("Erreur", "Sélectionne un document")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
 
         conn = sqlite3.connect(self.db_path)
@@ -5612,13 +5694,13 @@ class MainApp(ctk.CTkToplevel):
     def show_add_payment_dialog(self):
         invoice_id = self._get_selected_invoice_id()
         if not invoice_id:
-            messagebox.showerror("Erreur", "Sélectionne une facture")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_select_invoice"))
             return
         self.show_add_payment_dialog_for(invoice_id)
 
     def show_add_payment_dialog_for(self, document_id):
         dialog = ctk.CTkToplevel(self)
-        dialog.title("Enregistrer un paiement")
+        dialog.title(t("paiements.button_record_payment"))
         dialog.geometry("420x280")
         try:
             dialog.transient(self)
@@ -5629,11 +5711,11 @@ class MainApp(ctk.CTkToplevel):
         ctk.CTkLabel(
             dialog, text=f"Document ID: {document_id}", font=("Arial", 14, "bold")
         ).pack(pady=(15, 5))
-        ctk.CTkLabel(dialog, text="Montant").pack(pady=(10, 0))
+        ctk.CTkLabel(dialog, text=t("new_doc.discount_amount_label")).pack(pady=(10, 0))
         amount_entry = ctk.CTkEntry(dialog, width=220)
         amount_entry.pack(pady=(0, 10))
 
-        ctk.CTkLabel(dialog, text="Méthode (optionnel)").pack(pady=(5, 0))
+        ctk.CTkLabel(dialog, text=t("payment_dialog.label_method")).pack(pady=(5, 0))
         method_entry = ctk.CTkEntry(dialog, width=220)
         method_entry.pack(pady=(0, 10))
 
@@ -5641,7 +5723,7 @@ class MainApp(ctk.CTkToplevel):
             try:
                 amount = float(amount_entry.get().strip())
             except ValueError:
-                messagebox.showerror("Erreur", "Montant invalide")
+                messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_amount"))
                 return
             method = method_entry.get().strip() or None
 
@@ -5654,7 +5736,7 @@ class MainApp(ctk.CTkToplevel):
                 )
                 row = cursor.fetchone()
                 if not row:
-                    messagebox.showerror("Erreur", "Document introuvable")
+                    messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                     return
                 total_ttc = float(row[0] or 0)
                 paid = float(row[1] or 0)
@@ -5697,12 +5779,12 @@ class MainApp(ctk.CTkToplevel):
         btns.pack(fill="x", padx=20, pady=10)
         ctk.CTkButton(
             btns,
-            text="Annuler",
+            text=t("common.cancel"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
-        ctk.CTkButton(btns, text="Enregistrer", command=save_payment).pack(side="right")
+        ctk.CTkButton(btns, text=t("common.save"), command=save_payment).pack(side="right")
 
         amount_entry.focus_set()
 
@@ -5711,13 +5793,13 @@ class MainApp(ctk.CTkToplevel):
 
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
-        ctk.CTkLabel(header, text="Exportation", font=self.ui["font_h1"]).pack(
+        ctk.CTkLabel(header, text=t("export.header_title"), font=self.ui["font_h1"]).pack(
             side="left"
         )
 
         ctk.CTkLabel(
             frame,
-            text="Sélectionne un document (Devis / BL / Facture / Bon de réception) et double-clique dessus pour exporter/imprimer.",
+            text=t("export.instruction"),
             font=("Arial", 12),
         ).pack(pady=10)
 
@@ -5725,7 +5807,7 @@ class MainApp(ctk.CTkToplevel):
 
     def show_export_dialog_for_document(self, document_id):
         dialog = ctk.CTkToplevel(self)
-        dialog.title("Export / Impression")
+        dialog.title(t("export.dialog_title"))
         dialog.geometry("420x260")
         try:
             dialog.transient(self)
@@ -5785,17 +5867,17 @@ class MainApp(ctk.CTkToplevel):
             except Exception:
                 os.startfile(tmp)
 
-        ctk.CTkButton(dialog, text="Exporter (HTML)", command=export_html).pack(pady=6)
+        ctk.CTkButton(dialog, text=t("export.button_html"), command=export_html).pack(pady=6)
         ctk.CTkButton(
-            dialog, text="Imprimer HTML (Windows)", command=print_direct
+            dialog, text=t("export.button_print_html"), command=print_direct
         ).pack(pady=6)
-        ctk.CTkButton(dialog, text="Exporter (PDF)", command=export_pdf).pack(pady=6)
+        ctk.CTkButton(dialog, text=t("export.button_pdf"), command=export_pdf).pack(pady=6)
         ctk.CTkButton(
-            dialog, text="Imprimer PDF (Windows)", command=print_pdf_windows
+            dialog, text=t("export.button_print_pdf"), command=print_pdf_windows
         ).pack(pady=6)
         ctk.CTkButton(
             dialog,
-            text="Fermer",
+            text=t("common.close"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
@@ -5817,7 +5899,7 @@ class MainApp(ctk.CTkToplevel):
         ).pack(pady=(20, 10))
         
         ctk.CTkLabel(
-            dialog, text="Voulez-vous exporter le document ?", font=("Arial", 12)
+            dialog, text=t("export.new_doc_question"), font=("Arial", 12)
         ).pack(pady=(0, 15))
 
         def export_html():
@@ -5868,17 +5950,17 @@ class MainApp(ctk.CTkToplevel):
             except Exception:
                 os.startfile(tmp)
 
-        ctk.CTkButton(dialog, text="Exporter (HTML)", command=export_html).pack(pady=6)
+        ctk.CTkButton(dialog, text=t("export.button_html"), command=export_html).pack(pady=6)
         ctk.CTkButton(
-            dialog, text="Imprimer HTML (Windows)", command=print_direct
+            dialog, text=t("export.button_print_html"), command=print_direct
         ).pack(pady=6)
-        ctk.CTkButton(dialog, text="Exporter (PDF)", command=export_pdf).pack(pady=6)
+        ctk.CTkButton(dialog, text=t("export.button_pdf"), command=export_pdf).pack(pady=6)
         ctk.CTkButton(
-            dialog, text="Imprimer PDF (Windows)", command=print_pdf_windows
+            dialog, text=t("export.button_print_pdf"), command=print_pdf_windows
         ).pack(pady=6)
         ctk.CTkButton(
             dialog,
-            text="Fermer",
+            text=t("common.close"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
@@ -5903,7 +5985,7 @@ class MainApp(ctk.CTkToplevel):
             )
             doc = cursor.fetchone()
             if not doc:
-                raise ValueError("Document introuvable")
+                raise ValueError(t("payment_dialog.error_doc_not_found"))
 
             cursor.execute(
                 """
@@ -5937,10 +6019,10 @@ class MainApp(ctk.CTkToplevel):
             discount_value,
         ) = doc
         title = {
-            "devis": "Devis",
-            "bl": "Bon de livraison",
-            "factures": "Facture",
-            "reception": "Bon de réception",
+            "devis": t("nav.devis"),
+            "bl": t("nav.bl"),
+            "factures": t("doc_type.factures"),
+            "reception": t("nav.reception"),
         }.get(doc_type, doc_type)
 
         # Determine if we should show reference column (only for devis)
@@ -6062,7 +6144,7 @@ class MainApp(ctk.CTkToplevel):
             )
             doc = cursor.fetchone()
             if not doc:
-                raise ValueError("Document introuvable")
+                raise ValueError(t("payment_dialog.error_doc_not_found"))
 
             cursor.execute(
                 """
@@ -6097,10 +6179,10 @@ class MainApp(ctk.CTkToplevel):
         ) = doc
 
         title = {
-            "devis": "Devis",
-            "bl": "Bon de livraison",
-            "factures": "Facture",
-            "reception": "Bon de réception",
+            "devis": t("nav.devis"),
+            "bl": t("nav.bl"),
+            "factures": t("doc_type.factures"),
+            "reception": t("nav.reception"),
         }.get(doc_type, doc_type)
 
         doc = SimpleDocTemplate(
@@ -6145,7 +6227,7 @@ class MainApp(ctk.CTkToplevel):
 
         story.append(
             Paragraph(
-                "Gestion Commerciale",
+                t("app.title"),
                 ParagraphStyle(name="Brand", parent=bold, fontSize=12, spaceAfter=2),
             )
         )
@@ -6196,13 +6278,13 @@ class MainApp(ctk.CTkToplevel):
         
         if show_ref:
             table_header = [
-                Paragraph("Référence", bold),
-                Paragraph("Désignation", bold),
-                Paragraph("Qté", bold),
-                Paragraph("PU", bold),
-                Paragraph("TVA%", bold),
-                Paragraph("HT", bold),
-                Paragraph("TTC", bold),
+                Paragraph(t("articles.col_reference"), bold),
+                Paragraph(t("articles.col_designation"), bold),
+                Paragraph(t("article_dialog.col_qty"), bold),
+                Paragraph(t("new_doc.col_pu"), bold),
+                Paragraph(t("articles.col_tva"), bold),
+                Paragraph(t("documents.col_ht"), bold),
+                Paragraph(t("documents.col_ttc"), bold),
             ]
             col_widths = [
                 25 * mm,
@@ -6213,15 +6295,15 @@ class MainApp(ctk.CTkToplevel):
                 18 * mm,
                 18 * mm,
             ]
-            empty_row = [Paragraph("Aucune ligne", normal), "", "", "", "", "", ""]
+            empty_row = [Paragraph(t("export.html_no_lines"), normal), "", "", "", "", "", ""]
         else:
             table_header = [
-                Paragraph("Désignation", bold),
-                Paragraph("Qté", bold),
-                Paragraph("PU", bold),
-                Paragraph("TVA%", bold),
-                Paragraph("HT", bold),
-                Paragraph("TTC", bold),
+                Paragraph(t("articles.col_designation"), bold),
+                Paragraph(t("article_dialog.col_qty"), bold),
+                Paragraph(t("new_doc.col_pu"), bold),
+                Paragraph(t("articles.col_tva"), bold),
+                Paragraph(t("documents.col_ht"), bold),
+                Paragraph(t("documents.col_ttc"), bold),
             ]
             col_widths = [
                 65 * mm,
@@ -6231,7 +6313,7 @@ class MainApp(ctk.CTkToplevel):
                 18 * mm,
                 18 * mm,
             ]
-            empty_row = [Paragraph("Aucune ligne", normal), "", "", "", "", ""]
+            empty_row = [Paragraph(t("export.html_no_lines"), normal), "", "", "", "", ""]
         
         table_rows = [table_header]
 
@@ -6309,7 +6391,7 @@ class MainApp(ctk.CTkToplevel):
                 Paragraph(f"{float(total_tva or 0):.2f}", bold),
             ],
             [
-                Paragraph("Total TTC", bold),
+                Paragraph(t("client_dialog.col_ttc"), bold),
                 Paragraph(f"{float(total_ttc or 0):.2f}", bold),
             ],
         ]
@@ -6336,11 +6418,11 @@ class MainApp(ctk.CTkToplevel):
             discount_amount = total_ht * (discount_value / 100.0)
             discount_rows = [
                 [
-                    Paragraph("Remise", bold),
+                    Paragraph(t("new_doc.discount_label"), bold),
                     Paragraph(f"{float(discount_value):.1f}%", bold),
                 ],
                 [
-                    Paragraph("Montant", bold),
+                    Paragraph(t("new_doc.discount_amount_label"), bold),
                     Paragraph(f"-{float(discount_amount):.2f}", bold),
                 ],
             ]
@@ -6367,7 +6449,7 @@ class MainApp(ctk.CTkToplevel):
         wrapper.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
         story.append(wrapper)
         story.append(Spacer(1, 8))
-        story.append(Paragraph("Merci pour votre confiance.", small))
+        story.append(Paragraph(t("export.pdf_thank_you"), small))
 
         def on_page(c, _doc):
             c.setFont("Helvetica", 8)
@@ -6379,7 +6461,7 @@ class MainApp(ctk.CTkToplevel):
     def create_dashboard_frame(self):
         frame = ctk.CTkFrame(self.main_frame, corner_radius=0, fg_color="transparent")
 
-        title = ctk.CTkLabel(frame, text="Tableau de bord", font=("Arial", 24, "bold"))
+        title = ctk.CTkLabel(frame, text=t("dashboard.header"), font=("Arial", 24, "bold"))
         title.pack(pady=20)
 
         cards_frame = ctk.CTkFrame(frame, fg_color="transparent")
@@ -6448,7 +6530,7 @@ class MainApp(ctk.CTkToplevel):
             sales_frame, text="Dernières ventes", font=("Arial", 16, "bold")
         ).pack(pady=10)
 
-        columns = ("ID", "Produit", "Quantité", "Prix total", "Date")
+        columns = ("ID", "Produit", t("new_doc.col_qty"), "Prix total", t("article_dialog.col_date"))
         self.sales_tree = ttk.Treeview(
             sales_frame, columns=columns, show="headings", selectmode="browse"
         )
@@ -6522,7 +6604,7 @@ class MainApp(ctk.CTkToplevel):
         frame = ctk.CTkFrame(self.main_frame)
 
         title = ctk.CTkLabel(
-            frame, text="Gestion des Ventes", font=("Arial", 20, "bold")
+            frame, text=t("sales.header"), font=("Arial", 20, "bold")
         )
         title.pack(pady=20)
 
@@ -6544,7 +6626,7 @@ class MainApp(ctk.CTkToplevel):
         self.sale_search_entry.bind("<Return>", self.search_sales)
 
         search_btn = ctk.CTkButton(
-            search_frame, text="Rechercher", command=self.search_sales
+            search_frame, text=t("common.search"), command=self.search_sales
         )
         search_btn.pack(side="left")
 
@@ -6554,10 +6636,10 @@ class MainApp(ctk.CTkToplevel):
         )
 
         self.sales_tree.heading("id", text="ID")
-        self.sales_tree.heading("date", text="Date")
-        self.sales_tree.heading("client", text="Client")
+        self.sales_tree.heading("date", text=t("article_dialog.col_date"))
+        self.sales_tree.heading("client", text=t("documents.col_client"))
         self.sales_tree.heading("total", text="Total")
-        self.sales_tree.heading("statut", text="Statut")
+        self.sales_tree.heading("statut", text=t("client_dialog.col_status"))
         self.sales_tree.heading("actions", text="Actions")
 
         self.sales_tree.column("id", width=50, anchor="center")
@@ -6588,7 +6670,7 @@ class MainApp(ctk.CTkToplevel):
         header.pack(fill="x", pady=(0, 20))
 
         title = ctk.CTkLabel(
-            header, text="Gestion des produits", font=("Arial", 24, "bold")
+            header, text=t("products.header"), font=("Arial", 24, "bold")
         )
         title.pack(side="left")
 
@@ -6606,11 +6688,11 @@ class MainApp(ctk.CTkToplevel):
         self.search_entry.pack(side="left", padx=(0, 10))
 
         search_button = ctk.CTkButton(
-            search_frame, text="Rechercher", command=self.search_products
+            search_frame, text=t("common.search"), command=self.search_products
         )
         search_button.pack(side="left")
 
-        columns = ("ID", "Nom", "Description", "Prix", "Stock", "Actions")
+        columns = ("ID", t("clients.col_name"), "Description", "Prix", t("articles.col_stock"), "Actions")
         self.products_tree = ttk.Treeview(
             frame, columns=columns, show="headings", selectmode="browse"
         )
@@ -6707,7 +6789,7 @@ class MainApp(ctk.CTkToplevel):
 
             if not all([name, price, stock]):
                 messagebox.showerror(
-                    "Erreur", "Veuillez remplir tous les champs obligatoires"
+                    t("common.error"), t("validation.fill_required")
                 )
                 return
 
@@ -6727,14 +6809,14 @@ class MainApp(ctk.CTkToplevel):
                 conn.commit()
                 conn.close()
 
-                messagebox.showinfo("Succès", "Produit ajouté avec succès!")
+                messagebox.showinfo(t("register.success_title"), "Produit ajouté avec succès!")
                 self.load_products()
                 dialog.destroy()
 
             except ValueError:
                 messagebox.showerror(
-                    "Erreur",
-                    "Veuillez entrer des valeurs numériques valides pour le prix et le stock",
+                    t("common.error"),
+                    t("validation.price_stock_numeric"),
                 )
 
         ctk.CTkLabel(dialog, text="Nom du produit*").pack(pady=(10, 0))
@@ -6758,13 +6840,13 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             btn_frame,
-            text="Annuler",
+            text=t("common.cancel"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
 
-        ctk.CTkButton(btn_frame, text="Enregistrer", command=save_product).pack(
+        ctk.CTkButton(btn_frame, text=t("common.save"), command=save_product).pack(
             side="right"
         )
 
@@ -7047,7 +7129,7 @@ class MainApp(ctk.CTkToplevel):
         conn.close()
 
         if not product:
-            messagebox.showerror("Erreur", "Produit introuvable")
+            messagebox.showerror(t("common.error"), "Produit introuvable")
             return
 
         dialog = ctk.CTkToplevel(self)
@@ -7124,7 +7206,7 @@ class MainApp(ctk.CTkToplevel):
 
             if not all([name, price, stock]):
                 messagebox.showerror(
-                    "Erreur", "Veuillez remplir tous les champs obligatoires"
+                    t("common.error"), t("validation.fill_required")
                 )
                 return
 
@@ -7145,14 +7227,14 @@ class MainApp(ctk.CTkToplevel):
                 conn.commit()
                 conn.close()
 
-                messagebox.showinfo("Succès", "Produit mis à jour avec succès!")
+                messagebox.showinfo(t("register.success_title"), "Produit mis à jour avec succès!")
                 self.load_products()
                 dialog.destroy()
 
             except ValueError:
                 messagebox.showerror(
-                    "Erreur",
-                    "Veuillez entrer des valeurs numériques valides pour le prix et le stock",
+                    t("common.error"),
+                    t("validation.price_stock_numeric"),
                 )
 
         footer = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -7160,13 +7242,13 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             footer,
-            text="Annuler",
+            text=t("common.cancel"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
 
-        ctk.CTkButton(footer, text="Enregistrer", command=save_changes).pack(
+        ctk.CTkButton(footer, text=t("common.save"), command=save_changes).pack(
             side="right"
         )
 
@@ -7178,13 +7260,13 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text="Gestion des clients", font=self.ui["font_h1"]).pack(
+        ctk.CTkLabel(header, text=t("clients.header_title"), font=self.ui["font_h1"]).pack(
             side="left"
         )
 
         self.delete_client_btn = ctk.CTkButton(
             header,
-            text="Supprimer",
+            text=t("common.delete"),
             command=self.delete_selected_client,
             fg_color=self.ui.get("danger_fg", "#FF4B4B"),
             hover_color=self.ui.get("danger_hover", "#FF0000"),
@@ -7195,7 +7277,7 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             header,
-            text="+ Ajouter un client",
+            text=t("clients.button_add"),
             command=lambda: self.show_client_dialog(None),
         ).pack(side="right", padx=(0, 6))
 
@@ -7211,7 +7293,7 @@ class MainApp(ctk.CTkToplevel):
         self.client_search_entry = ctk.CTkEntry(
             self.client_search_container,
             width=350,
-            placeholder_text="Rechercher un client...",
+            placeholder_text=t("clients.search_placeholder"),
         )
         self.client_search_entry.pack(fill="x")
 
@@ -7226,7 +7308,7 @@ class MainApp(ctk.CTkToplevel):
 
         # Search button
         ctk.CTkButton(
-            search_frame, text="Rechercher", command=self.search_clients
+            search_frame, text=t("common.search"), command=self.search_clients
         ).pack(side="left")
 
         # Bind events for autocomplete
@@ -7238,24 +7320,24 @@ class MainApp(ctk.CTkToplevel):
         )
         self.client_dropdown.bind("<Button-1>", lambda e: "break")  # Prevent focus loss
 
-        columns = ("ID", "Nom", "Email", "Téléphone", "Adresse", "Matricule fiscale")
+        columns = ("ID", t("clients.col_name"), t("register.email_placeholder"), t("clients.col_phone"), t("clients.col_address"), t("clients.col_tax_id"))
         self.clients_tree = ttk.Treeview(
             frame, columns=columns, show="headings", selectmode="browse"
         )
 
         self.clients_tree.heading("ID", text="ID")
-        self.clients_tree.heading("Nom", text="Nom")
-        self.clients_tree.heading("Email", text="Email")
-        self.clients_tree.heading("Téléphone", text="Téléphone")
-        self.clients_tree.heading("Adresse", text="Adresse")
-        self.clients_tree.heading("Matricule fiscale", text="Matricule fiscale")
+        self.clients_tree.heading(t("clients.col_name"), text=t("clients.col_name"))
+        self.clients_tree.heading(t("register.email_placeholder"), text=t("register.email_placeholder"))
+        self.clients_tree.heading(t("clients.col_phone"), text=t("clients.col_phone"))
+        self.clients_tree.heading(t("clients.col_address"), text=t("clients.col_address"))
+        self.clients_tree.heading(t("clients.col_tax_id"), text=t("clients.col_tax_id"))
 
         self.clients_tree.column("ID", width=60, anchor="center")
-        self.clients_tree.column("Nom", width=180, anchor="w")
-        self.clients_tree.column("Email", width=220, anchor="w")
-        self.clients_tree.column("Téléphone", width=140, anchor="center")
-        self.clients_tree.column("Adresse", width=260, anchor="w")
-        self.clients_tree.column("Matricule fiscale", width=150, anchor="w")
+        self.clients_tree.column(t("clients.col_name"), width=180, anchor="w")
+        self.clients_tree.column(t("register.email_placeholder"), width=220, anchor="w")
+        self.clients_tree.column(t("clients.col_phone"), width=140, anchor="center")
+        self.clients_tree.column(t("clients.col_address"), width=260, anchor="w")
+        self.clients_tree.column(t("clients.col_tax_id"), width=150, anchor="w")
 
         scrollbar = ttk.Scrollbar(
             frame, orient="vertical", command=self.clients_tree.yview
@@ -7272,7 +7354,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Add sorting functionality
         self.client_sort_state = {}  # Track sort state per column
-        columns = ("ID", "Nom", "Email", "Téléphone", "Adresse", "Matricule fiscale")
+        columns = ("ID", t("clients.col_name"), t("register.email_placeholder"), t("clients.col_phone"), t("clients.col_address"), t("clients.col_tax_id"))
         for col in columns:
             self.clients_tree.heading(col, command=lambda c=col: self.sort_clients(c))
         
@@ -7292,7 +7374,7 @@ class MainApp(ctk.CTkToplevel):
         
         # Update all headers to show arrows
         arrow = "▲" if new_state else "▼"
-        all_cols = ["ID", "Nom", "Email", "Téléphone", "Adresse", "Matricule fiscale"]
+        all_cols = ["ID", t("clients.col_name"), t("register.email_placeholder"), t("clients.col_phone"), t("clients.col_address"), t("clients.col_tax_id")]
         for col in all_cols:
             if col == column:
                 self.clients_tree.heading(col, text=f"{col} {arrow}")
@@ -7307,11 +7389,11 @@ class MainApp(ctk.CTkToplevel):
         # Column index mapping
         col_index = {
             "ID": 0,
-            "Nom": 1,
-            "Email": 2,
-            "Téléphone": 3,
-            "Adresse": 4,
-            "Matricule fiscale": 5,
+            t("clients.col_name"): 1,
+            t("register.email_placeholder"): 2,
+            t("clients.col_phone"): 3,
+            t("clients.col_address"): 4,
+            t("clients.col_tax_id"): 5,
         }
         
         idx = col_index.get(column, 0)
@@ -7540,7 +7622,7 @@ class MainApp(ctk.CTkToplevel):
 
     def show_client_dialog(self, client_id=None):
         dialog = ctk.CTkToplevel(self)
-        dialog.title("Fiche Client" if client_id else "Nouveau Client")
+        dialog.title(t("client_dialog.title_edit") if client_id else t("client_dialog.title_new"))
         dialog.geometry("980x850")
         try:
             dialog.transient(self)
@@ -7577,7 +7659,7 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             header,
-            text="Fiche Client",
+            text=t("client_dialog.title_edit"),
             font=self.ui["font_h1"],
         ).pack(side="left")
 
@@ -7585,7 +7667,7 @@ class MainApp(ctk.CTkToplevel):
         actions.pack(side="right")
         ctk.CTkButton(
             actions,
-            text="Documents",
+            text=t("client_dialog.button_documents"),
             state="disabled",
             fg_color="transparent",
             border_width=1,
@@ -7600,10 +7682,10 @@ class MainApp(ctk.CTkToplevel):
         right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="right")
 
-        ctk.CTkLabel(left, text="Nom*", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("client_dialog.label_name"), font=self.ui["font_h2"]).grid(
             row=0, column=0, sticky="w"
         )
-        ctk.CTkLabel(left, text="Téléphone", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("clients.col_phone"), font=self.ui["font_h2"]).grid(
             row=0, column=1, sticky="w", padx=(10, 0)
         )
 
@@ -7615,7 +7697,7 @@ class MainApp(ctk.CTkToplevel):
         tel_entry.insert(0, tel_value)
         tel_entry.grid(row=1, column=1, sticky="w", pady=(0, 8), padx=(10, 0))
 
-        ctk.CTkLabel(left, text="Email", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("register.email_placeholder"), font=self.ui["font_h2"]).grid(
             row=2, column=0, sticky="w"
         )
 
@@ -7623,7 +7705,7 @@ class MainApp(ctk.CTkToplevel):
         email_entry.insert(0, email_value)
         email_entry.grid(row=3, column=0, sticky="w", pady=(0, 8))
 
-        ctk.CTkLabel(left, text="Adresse", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("clients.col_address"), font=self.ui["font_h2"]).grid(
             row=4, column=0, sticky="w"
         )
 
@@ -7631,7 +7713,7 @@ class MainApp(ctk.CTkToplevel):
         addr_entry.insert(0, addr_value)
         addr_entry.grid(row=5, column=0, columnspan=2, sticky="w")
 
-        ctk.CTkLabel(left, text="Matricule fiscale", font=self.ui["font_h2"]).grid(
+        ctk.CTkLabel(left, text=t("clients.col_tax_id"), font=self.ui["font_h2"]).grid(
             row=6, column=0, sticky="w"
         )
 
@@ -7641,7 +7723,7 @@ class MainApp(ctk.CTkToplevel):
 
         statut_label = ctk.CTkLabel(
             right,
-            text=f"Client #{client_id if client_id else 'New'}",
+            text=t("client_dialog.label_client_id", id=str(client_id if client_id else "New")),
             font=self.ui["font_h2"],
         )
         statut_label.pack(anchor="e")
@@ -7650,10 +7732,10 @@ class MainApp(ctk.CTkToplevel):
         content.pack(fill="both", expand=True, padx=20, pady=(10, 10))
 
         ctk.CTkLabel(
-            content, text="Historique des documents", font=self.ui["font_h2"]
+            content, text=t("client_dialog.history_heading"), font=self.ui["font_h2"]
         ).pack(anchor="w", pady=(0, 5))
 
-        columns = ("Date", "Type", "Numéro", "Total TTC", "Statut")
+        columns = (t("article_dialog.col_date"), t("client_dialog.col_type"), t("client_dialog.col_number"), t("client_dialog.col_ttc"), t("client_dialog.col_status"))
         history_tree = ttk.Treeview(
             content, columns=columns, show="headings", selectmode="browse"
         )
@@ -7661,9 +7743,9 @@ class MainApp(ctk.CTkToplevel):
             history_tree.heading(col, text=col)
             history_tree.column(col, anchor="center")
 
-        history_tree.column("Type", width=100)
-        history_tree.column("Numéro", width=120)
-        history_tree.column("Total TTC", width=100, anchor="e")
+        history_tree.column(t("client_dialog.col_type"), width=100)
+        history_tree.column(t("client_dialog.col_number"), width=120)
+        history_tree.column(t("client_dialog.col_ttc"), width=100, anchor="e")
 
         scrollbar = ttk.Scrollbar(
             content, orient="vertical", command=history_tree.yview
@@ -7713,7 +7795,7 @@ class MainApp(ctk.CTkToplevel):
         spent_box.pack(side="right")
         ctk.CTkLabel(
             spent_box,
-            text="Total Dépensé (TTC)",
+            text=t("client_dialog.total_spent"),
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
@@ -7733,7 +7815,7 @@ class MainApp(ctk.CTkToplevel):
             matricule_fiscale = matricule_fiscale_entry.get().strip()
 
             if not nom:
-                messagebox.showerror("Erreur", "Le nom est obligatoire")
+                messagebox.showerror(t("common.error"), t("clients.error_name_required"))
                 return
 
             conn = sqlite3.connect(self.db_path)
@@ -7758,13 +7840,13 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             footer,
-            text="Fermer",
+            text=t("common.close"),
             command=dialog.destroy,
             fg_color="gray",
             hover_color="darkgray",
         ).pack(side="right", padx=10)
 
-        ctk.CTkButton(footer, text="Enregistrer", command=save_client).pack(
+        ctk.CTkButton(footer, text=t("common.save"), command=save_client).pack(
             side="right"
         )
 
@@ -7781,24 +7863,24 @@ class MainApp(ctk.CTkToplevel):
 
     def delete_selected_client(self):
         if not hasattr(self, "clients_tree"):
-            messagebox.showerror("Erreur", "Aucune liste de clients disponible")
+            messagebox.showerror(t("common.error"), t("clients.error_no_list"))
             return
         sel = self.clients_tree.selection()
         if not sel:
-            messagebox.showerror("Erreur", "Sélectionne un client à supprimer")
+            messagebox.showerror(t("common.error"), t("clients.error_select_to_delete"))
             return
         try:
             vals = self.clients_tree.item(sel[0], "values")
         except Exception:
-            messagebox.showerror("Erreur", "Impossible de lire la sélection")
+            messagebox.showerror(t("common.error"), t("articles.error_read_selection"))
             return
         if not vals:
-            messagebox.showerror("Erreur", "Sélectionne un client à supprimer")
+            messagebox.showerror(t("common.error"), t("clients.error_select_to_delete"))
             return
         try:
             client_id = int(vals[0])
         except Exception:
-            messagebox.showerror("Erreur", "ID client invalide")
+            messagebox.showerror(t("common.error"), t("clients.error_invalid_id"))
             return
 
         conn = sqlite3.connect(self.db_path)
@@ -7813,7 +7895,7 @@ class MainApp(ctk.CTkToplevel):
         try:
             if docs_count and docs_count > 0:
                 if not messagebox.askyesno(
-                    "Confirmer",
+                    t("common.confirm"),
                     f"Le client a {docs_count} document(s). Supprimer le client ET ses documents/paiements associés ?",
                     icon="warning",
                 ):
@@ -7833,7 +7915,7 @@ class MainApp(ctk.CTkToplevel):
                     )
             else:
                 if not messagebox.askyesno(
-                    "Confirmer", "Supprimer le client sélectionné ?"
+                    t("common.confirm"), t("clients.confirm_delete")
                 ):
                     return
 
@@ -7841,7 +7923,7 @@ class MainApp(ctk.CTkToplevel):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            messagebox.showerror("Erreur", f"Erreur lors de la suppression : {e}")
+            messagebox.showerror(t("common.error"), f"Erreur lors de la suppression : {e}")
             return
         finally:
             conn.close()
@@ -7855,34 +7937,34 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
 
-        messagebox.showinfo("Supprimé", "Client supprimé avec succès")
+        messagebox.showinfo(t("common.deleted"), t("clients.deleted_success"))
 
     def delete_selected_document(self, doc_type):
         tree = getattr(self, "documents_trees", {}).get(doc_type)
         if not tree:
-            messagebox.showerror("Erreur", "Aucun document sélectionné")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_no_doc_selected"))
             return
         sel = tree.selection()
         if not sel:
-            messagebox.showerror("Erreur", "Sélectionne un document à supprimer")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         try:
             vals = tree.item(sel[0], "values")
         except Exception:
-            messagebox.showerror("Erreur", "Impossible de lire la sélection")
+            messagebox.showerror(t("common.error"), t("articles.error_read_selection"))
             return
         if not vals:
-            messagebox.showerror("Erreur", "Sélectionne un document à supprimer")
+            messagebox.showerror(t("common.error"), t("documents.error_select"))
             return
         try:
             doc_id = int(vals[0])
         except Exception:
-            messagebox.showerror("Erreur", "ID de document invalide")
+            messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_doc_id"))
             return
 
         if not messagebox.askyesno(
-            "Confirmer",
-            "Voulez-vous vraiment supprimer ce document ? Cette action est irréversible.",
+            t("common.confirm"),
+            t("documents.confirm_delete_irreversible"),
         ):
             return
 
@@ -7897,7 +7979,7 @@ class MainApp(ctk.CTkToplevel):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            messagebox.showerror("Erreur", f"Erreur lors de la suppression : {e}")
+            messagebox.showerror(t("common.error"), f"Erreur lors de la suppression : {e}")
             return
         finally:
             conn.close()
@@ -7911,7 +7993,7 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
 
-        messagebox.showinfo("Supprimé", "Document supprimé avec succès")
+        messagebox.showinfo(t("common.deleted"), t("documents.deleted_success"))
 
     def _update_client_delete_button(self):
         try:
@@ -7937,7 +8019,7 @@ class MainApp(ctk.CTkToplevel):
     def create_reports_frame(self):
         frame = ctk.CTkFrame(self.main_frame, corner_radius=0, fg_color="transparent")
 
-        ctk.CTkLabel(frame, text="Rapports", font=("Arial", 24, "bold")).pack(pady=20)
+        ctk.CTkLabel(frame, text=t("reports.header"), font=("Arial", 24, "bold")).pack(pady=20)
 
         ctk.CTkButton(frame, text="Exporter", command=self.export_report).pack(
             pady=(0, 20)
@@ -7961,18 +8043,18 @@ class MainApp(ctk.CTkToplevel):
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 20))
 
-        ctk.CTkLabel(header, text="Administration", font=("Arial", 24, "bold")).pack(
+        ctk.CTkLabel(header, text=t("nav.admin"), font=("Arial", 24, "bold")).pack(
             side="left"
         )
 
         tabview = ctk.CTkTabview(frame)
         tabview.pack(fill="both", expand=True)
-        tabview.add("Utilisateurs")
-        tabview.add("Maintenance")
+        tabview.add(t("admin.section_users"))
+        tabview.add(t("admin.tab_maintenance"))
 
-        users_frame = tabview.tab("Utilisateurs")
+        users_frame = tabview.tab(t("admin.section_users"))
 
-        columns = ("ID", "Username", "Email", "Nom", "Admin")
+        columns = ("ID", "Username", t("register.email_placeholder"), t("clients.col_name"), t("admin.col_admin"))
         self.users_tree = ttk.Treeview(
             users_frame, columns=columns, show="headings", selectmode="browse"
         )
@@ -7989,11 +8071,11 @@ class MainApp(ctk.CTkToplevel):
         self.users_tree.pack(fill="both", expand=True)
         self.load_users()
 
-        maint_frame = tabview.tab("Maintenance")
+        maint_frame = tabview.tab(t("admin.tab_maintenance"))
 
         ctk.CTkLabel(
             maint_frame,
-            text="Zone de Danger",
+            text=t("admin.danger_zone"),
             font=("Arial", 20, "bold"),
             text_color="#FF4B4B",
         ).pack(pady=(20, 10), anchor="w", padx=20)
@@ -8006,7 +8088,7 @@ class MainApp(ctk.CTkToplevel):
 
         ctk.CTkButton(
             maint_frame,
-            text="Réinitialiser TOUTE la base de données",
+            text=t("admin.button_reset_all"),
             command=self.wipe_database,
             fg_color="#FF4B4B",
             hover_color="#FF0000",
@@ -8017,19 +8099,19 @@ class MainApp(ctk.CTkToplevel):
 
     def wipe_database(self):
         if not messagebox.askyesno(
-            "Confirmation CRITIQUE",
+            t("admin.critical_confirm_title"),
             "Êtes-vous SÛR de vouloir effacer TOUTE la base de données ?\n\nCette action est irréversible !",
             icon="warning",
         ):
             return
 
         dialog = ctk.CTkInputDialog(
-            text="Tapez 'SUPPRIMER' pour confirmer :", title="Dernière confirmation"
+            text=t("admin.type_delete_prompt"), title=t("admin.final_confirm_title")
         )
         text = dialog.get_input()
 
-        if text != "SUPPRIMER":
-            messagebox.showinfo("Annulé", "Opération annulée.")
+        if text != t("admin.delete_keyword"):
+            messagebox.showinfo(t("msgbox.cancelled"), t("admin.cancelled"))
             return
 
         try:
@@ -8067,11 +8149,11 @@ class MainApp(ctk.CTkToplevel):
             if hasattr(self, "products_tree") and hasattr(self, "load_products"):
                 self.load_products()
 
-            messagebox.showinfo("Succès", "Base de données réinitialisée.")
+            messagebox.showinfo(t("register.success_title"), t("admin.reset_success"))
             self.show_frame("admin")
 
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la réinitialisation : {e}")
+            messagebox.showerror(t("common.error"), t("admin.error_reset", error=str(e)))
 
     def load_users(self):
         for item in self.users_tree.get_children():
@@ -8092,7 +8174,7 @@ class MainApp(ctk.CTkToplevel):
                         row[1] or "",
                         row[2] or "",
                         row[3] or "",
-                        "Oui" if row[4] else "Non",
+                        t("common.yes") if row[4] else t("common.no"),
                     ),
                 )
         finally:
@@ -8109,7 +8191,7 @@ class MainApp(ctk.CTkToplevel):
     def on_closing(self):
         """Gérer la fermeture de la fenêtre"""
         if messagebox.askokcancel(
-            "Quitter", "Voulez-vous vraiment quitter l'application ?"
+            t("login.quit_title"), t("login.quit_confirm")
         ):
             self.quit()
 
