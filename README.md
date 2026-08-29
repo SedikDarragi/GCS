@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
   <a href="https://github.com/SedikDarragi"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square" alt="Platform"></a>
   <img src="https://img.shields.io/badge/version-0.1.7_beta-blue?style=flat-square" alt="Version 0.1.7 beta">
   <img src="https://img.shields.io/badge/tests-pytest-0A9EDC?style=flat-square&logo=pytest" alt="Tests: pytest">
@@ -21,11 +20,14 @@
 <p align="center">
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-features">Features</a> •
-  <a href="#-screenshots">Screenshots</a> •
   <a href="#-project-structure">Structure</a> •
   <a href="#-security">Security</a> •
   <a href="SETUP.md">Setup Guide</a> •
   <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
+  <img src="demo.png" alt="My Image" width="800">
 </p>
 
 ---
