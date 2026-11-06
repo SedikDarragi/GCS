@@ -1145,6 +1145,8 @@ class MainApp(ctk.CTkToplevel):
                     payment_mode TEXT NOT NULL DEFAULT 'none',
                     echeance TEXT,
                     source_bl_id INTEGER,
+                    converted_to_id INTEGER,
+                    converted_at TEXT,
                     discount_enabled INTEGER NOT NULL DEFAULT 0,
                     discount_value REAL NOT NULL DEFAULT 0,
                     FOREIGN KEY(client_id) REFERENCES clients(id)
@@ -1202,6 +1204,8 @@ class MainApp(ctk.CTkToplevel):
                 "ALTER TABLE clients ADD COLUMN matricule_fiscale TEXT",
                 "ALTER TABLE documents ADD COLUMN discount_enabled INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE documents ADD COLUMN discount_value REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE documents ADD COLUMN converted_to_id INTEGER",
+                "ALTER TABLE documents ADD COLUMN converted_at TEXT",
             ]:
                 try:
                     cursor.execute(ddl)
@@ -1867,7 +1871,7 @@ class MainApp(ctk.CTkToplevel):
                     c.id,
                     c.nom
                 FROM clients c
-                LEFT JOIN documents d ON c.id = d.client_id AND d.type IN ('devis', 'bl', 'factures')
+                LEFT JOIN documents d ON c.id = d.client_id AND d.type = 'factures'
                 WHERE (CAST(c.id AS TEXT) LIKE ? OR c.nom LIKE ?)
                 GROUP BY c.id
                 ORDER BY c.nom
@@ -1976,6 +1980,7 @@ class MainApp(ctk.CTkToplevel):
                     d.type
                 FROM documents d
                 WHERE d.client_id = ?
+                  AND d.type = 'factures'
                   AND (COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)) > 0
                   AND (CAST(d.id AS TEXT) LIKE ? OR d.numero LIKE ? OR d.type LIKE ?)
                 ORDER BY d.date DESC, d.id DESC
@@ -4852,7 +4857,9 @@ class MainApp(ctk.CTkToplevel):
             cursor.execute(
                 """
                 SELECT id, type, numero, date, client_id, statut,
-                       total_ht, total_tva, total_ttc
+                       total_ht, total_tva, total_ttc,
+                       paid_amount, payment_mode, echeance,
+                       discount_enabled, discount_value, converted_to_id
                 FROM documents
                 WHERE id = ?
                 """,
@@ -4869,6 +4876,16 @@ class MainApp(ctk.CTkToplevel):
                 messagebox.showerror(t("common.error"), t("documents.error_convert_bl_only"))
                 return
 
+            # A document may only be converted once. A dangling link (target
+            # deleted) is ignored so the conversion can be repeated.
+            if doc[14]:
+                cursor.execute("SELECT 1 FROM documents WHERE id = ?", (doc[14],))
+                if cursor.fetchone():
+                    messagebox.showerror(
+                        t("common.error"), t("documents.error_already_converted")
+                    )
+                    return
+
             new_numero = self.get_next_numero(to_type)
             new_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             source_bl_id = doc_id if to_type == "factures" else None
@@ -4877,8 +4894,10 @@ class MainApp(ctk.CTkToplevel):
                 """
                 INSERT INTO documents (type, numero, date, client_id, statut,
                                        total_ht, total_tva, total_ttc,
-                                       paid_amount, payment_mode, source_bl_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                       paid_amount, payment_mode, echeance,
+                                       discount_enabled, discount_value,
+                                       source_bl_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     to_type,
@@ -4889,8 +4908,11 @@ class MainApp(ctk.CTkToplevel):
                     doc[6],
                     doc[7],
                     doc[8],
-                    0.0,
-                    "none",
+                    doc[9] or 0.0,
+                    doc[10] or "none",
+                    doc[11],
+                    doc[12] or 0,
+                    doc[13] or 0.0,
                     source_bl_id,
                 ),
             )
@@ -4932,13 +4954,36 @@ class MainApp(ctk.CTkToplevel):
                     ),
                 )
 
+            # Payments recorded against the source (for example a deposit on a
+            # quote) follow the document into its converted form.
+            cursor.execute(
+                "UPDATE payments SET document_id = ? WHERE document_id = ?",
+                (new_doc_id, doc_id),
+            )
+
+            cursor.execute(
+                """
+                UPDATE documents
+                SET converted_to_id = ?, converted_at = ?,
+                    paid_amount = 0, payment_mode = 'none'
+                WHERE id = ?
+                """,
+                (new_doc_id, new_date, doc_id),
+            )
+
             conn.commit()
+        except Exception as e:
+            conn.rollback()
+            messagebox.showerror(t("common.error"), str(e))
+            return
         finally:
             conn.close()
 
         self.load_documents(to_type)
         self.load_paiements()
-        messagebox.showinfo("Conversion", f"Document converti: {new_numero}")
+        messagebox.showinfo(
+            "Conversion", t("documents.convert_success", number=new_numero)
+        )
 
     def validate_selected_document(self, doc_type):
         doc_id = self._get_selected_doc_id_from_type(doc_type)
@@ -5333,9 +5378,9 @@ class MainApp(ctk.CTkToplevel):
         try:
             cursor.execute(
                 """
-                SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)), 0) as unpaid
+                SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(MAX(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0), 0)), 0) as unpaid
                 FROM clients c
-                LEFT JOIN documents d ON c.id = d.client_id AND d.type IN ('devis', 'bl', 'factures')
+                LEFT JOIN documents d ON c.id = d.client_id AND d.type = 'factures'
                 GROUP BY c.id
                 ORDER BY unpaid DESC, c.nom
                 """
@@ -5393,11 +5438,11 @@ class MainApp(ctk.CTkToplevel):
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         try:
-            # Show all documents for the client (both paid and unpaid)
+            # Outstanding balances are tracked per invoice only.
             cur.execute(
                 """
                 SELECT id, numero, type, total_ttc, COALESCE(paid_amount,0) FROM documents
-                WHERE client_id = ?
+                WHERE client_id = ? AND type = 'factures'
                 ORDER BY date DESC, id DESC
                 """,
                 (client_id,),
@@ -5480,9 +5525,9 @@ class MainApp(ctk.CTkToplevel):
 
             where_clause = " OR ".join(conditions)
             sql = f"""
-                SELECT DISTINCT c.id, COALESCE(c.nom,''), COALESCE(SUM(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)), 0) as unpaid
+                SELECT DISTINCT c.id, COALESCE(c.nom,''), COALESCE(SUM(MAX(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0), 0)), 0) as unpaid
                 FROM clients c
-                LEFT JOIN documents d ON c.id = d.client_id AND d.type IN ('devis', 'bl', 'factures')
+                LEFT JOIN documents d ON c.id = d.client_id AND d.type = 'factures'
                 WHERE ({where_clause})
                 GROUP BY c.id
                 ORDER BY unpaid DESC, c.nom
@@ -5490,9 +5535,9 @@ class MainApp(ctk.CTkToplevel):
         else:
             if not q:
                 sql = """
-                    SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)), 0) as unpaid
+                    SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(MAX(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0), 0)), 0) as unpaid
                     FROM clients c
-                    LEFT JOIN documents d ON c.id = d.client_id AND d.type IN ('devis', 'bl', 'factures')
+                    LEFT JOIN documents d ON c.id = d.client_id AND d.type = 'factures'
                     GROUP BY c.id
                     ORDER BY unpaid DESC, c.nom
                     """
@@ -5500,9 +5545,9 @@ class MainApp(ctk.CTkToplevel):
             else:
                 like_q = f"%{q}%"
                 sql = """
-                    SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)), 0) as unpaid
+                    SELECT c.id, COALESCE(c.nom,''), COALESCE(SUM(MAX(COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0), 0)), 0) as unpaid
                     FROM clients c
-                    LEFT JOIN documents d ON c.id = d.client_id AND d.type IN ('devis', 'bl', 'factures')
+                    LEFT JOIN documents d ON c.id = d.client_id AND d.type = 'factures'
                     WHERE (c.nom LIKE ? OR CAST(c.id AS TEXT) LIKE ?)
                     GROUP BY c.id
                     ORDER BY unpaid DESC, c.nom
@@ -5578,7 +5623,8 @@ class MainApp(ctk.CTkToplevel):
             sql = f"""
                 SELECT DISTINCT d.id, d.numero, d.type, d.total_ttc, COALESCE(d.paid_amount,0)
                 FROM documents d
-                WHERE d.client_id = ? AND (COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)) > 0
+                WHERE d.client_id = ? AND d.type = 'factures'
+                  AND (COALESCE(d.total_ttc,0) - COALESCE(d.paid_amount,0)) > 0
                   AND ({where_clause})
                 ORDER BY d.date DESC, d.id DESC
                 """
@@ -5586,7 +5632,8 @@ class MainApp(ctk.CTkToplevel):
             if not q:
                 sql = """
                     SELECT id, numero, type, total_ttc, COALESCE(paid_amount,0) FROM documents
-                    WHERE client_id = ? AND (COALESCE(total_ttc,0) - COALESCE(paid_amount,0)) > 0
+                    WHERE client_id = ? AND type = 'factures'
+                      AND (COALESCE(total_ttc,0) - COALESCE(paid_amount,0)) > 0
                     ORDER BY date DESC, id DESC
                     """
                 params = []
@@ -5594,7 +5641,8 @@ class MainApp(ctk.CTkToplevel):
                 like_q = f"%{q}%"
                 sql = """
                     SELECT id, numero, type, total_ttc, COALESCE(paid_amount,0) FROM documents
-                    WHERE client_id = ? AND (COALESCE(total_ttc,0) - COALESCE(paid_amount,0)) > 0
+                    WHERE client_id = ? AND type = 'factures'
+                      AND (COALESCE(total_ttc,0) - COALESCE(paid_amount,0)) > 0
                       AND (CAST(id AS TEXT) LIKE ? OR numero LIKE ? OR type LIKE ?)
                     ORDER BY date DESC, id DESC
                     """
@@ -5628,14 +5676,15 @@ class MainApp(ctk.CTkToplevel):
                 if not q:
                     sql = """
                         SELECT id, numero, type, total_ttc, COALESCE(paid_amount,0) FROM documents
-                        WHERE client_id = ?
+                        WHERE client_id = ? AND type = 'factures'
                         ORDER BY date DESC, id DESC
                         """
                     cur.execute(sql, (client_id,))
                 else:
                     sql = """
                         SELECT id, numero, type, total_ttc, COALESCE(paid_amount,0) FROM documents
-                        WHERE client_id = ? AND (CAST(id AS TEXT) LIKE ? OR numero LIKE ? OR type LIKE ?)
+                        WHERE client_id = ? AND type = 'factures'
+                          AND (CAST(id AS TEXT) LIKE ? OR numero LIKE ? OR type LIKE ?)
                         ORDER BY date DESC, id DESC
                         """
                     cur.execute(sql, (client_id,) + tuple(params))
@@ -8141,6 +8190,17 @@ class MainApp(ctk.CTkToplevel):
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         try:
+            # If this document is the target of a conversion, release the
+            # source so it can be converted again.
+            cur.execute(
+                """
+                UPDATE documents
+                SET converted_to_id = NULL, converted_at = NULL
+                WHERE converted_to_id = ?
+                """,
+                (doc_id,),
+            )
+
             cur.execute("DELETE FROM payments WHERE document_id = ?", (doc_id,))
 
             cur.execute("DELETE FROM document_lignes WHERE document_id = ?", (doc_id,))
