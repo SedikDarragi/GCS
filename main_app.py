@@ -1488,33 +1488,34 @@ class MainApp(ctk.CTkToplevel):
             )
             row = cur.fetchone()
             ref_count = row[0] if row else 0
-        except Exception:
-            ref_count = 0
 
-        try:
-            if ref_count and ref_count > 0:
+            if ref_count > 0:
                 if not messagebox.askyesno(
                     t("common.confirm"),
-                    f"Cet article est référencé dans {ref_count} ligne(s) de documents. Supprimer l'article ET les lignes associées ?",
+                    t("articles.confirm_delete_referenced", count=ref_count),
                     icon="warning",
                 ):
                     return
 
+                # Keep historical document lines intact. The line still
+                # carries its designation, quantity, price and VAT; only the
+                # link to the catalog product is removed.
                 cur.execute(
-                    "DELETE FROM document_lignes WHERE article_id = ?", (article_id,)
+                    "UPDATE document_lignes SET article_id = NULL WHERE article_id = ?",
+                    (article_id,),
                 )
-
-            else:
-                if not messagebox.askyesno(
-                    t("common.confirm"), t("articles.confirm_delete")
-                ):
-                    return
+            elif not messagebox.askyesno(
+                t("common.confirm"), t("articles.confirm_delete")
+            ):
+                return
 
             cur.execute("DELETE FROM articles WHERE id = ?", (article_id,))
             conn.commit()
         except Exception as e:
             conn.rollback()
-            messagebox.showerror(t("common.error"), f"Erreur lors de la suppression : {e}")
+            messagebox.showerror(
+                t("common.error"), t("articles.error_delete", error=str(e))
+            )
             return
         finally:
             conn.close()
@@ -1524,8 +1525,8 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
         try:
-            for t in ("devis", "bl", "factures", "reception"):
-                self.load_documents(t)
+            for doc_type in ("devis", "bl", "factures", "reception"):
+                self.load_documents(doc_type)
         except Exception:
             pass
 
@@ -8080,6 +8081,74 @@ class MainApp(ctk.CTkToplevel):
             return
         self.show_client_dialog(int(values[0]))
 
+    def _delete_documents_cascade(self, cur, doc_ids):
+        """Delete documents and their dependent rows.
+
+        Stock movements for validated BL/reception documents are reversed,
+        and conversion/source links pointing at the deleted documents are
+        cleared so no dangling references remain.
+        """
+        doc_ids = [int(doc_id) for doc_id in doc_ids]
+        if not doc_ids:
+            return
+
+        placeholders = ",".join("?" for _ in doc_ids)
+        ids = tuple(doc_ids)
+
+        cur.execute(
+            f"SELECT id, type, statut FROM documents WHERE id IN ({placeholders})",
+            ids,
+        )
+        documents = cur.fetchall()
+
+        for doc_id, doc_type, statut in documents:
+            if statut != "valide" or doc_type not in ("bl", "reception"):
+                continue
+
+            cur.execute(
+                "SELECT article_id, quantite FROM document_lignes WHERE document_id = ?",
+                (doc_id,),
+            )
+            for article_id, quantite in cur.fetchall():
+                if article_id is None:
+                    continue
+                qty = int(float(quantite or 0))
+                if doc_type == "bl":
+                    cur.execute(
+                        "UPDATE articles SET stock = stock + ? WHERE id = ?",
+                        (qty, int(article_id)),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE articles SET stock = stock - ? WHERE id = ?",
+                        (qty, int(article_id)),
+                    )
+
+        cur.execute(
+            f"""
+            UPDATE documents
+            SET converted_to_id = NULL, converted_at = NULL
+            WHERE converted_to_id IN ({placeholders})
+            """,
+            ids,
+        )
+        cur.execute(
+            f"UPDATE documents SET source_bl_id = NULL WHERE source_bl_id IN ({placeholders})",
+            ids,
+        )
+        cur.execute(
+            f"DELETE FROM payments WHERE document_id IN ({placeholders})",
+            ids,
+        )
+        cur.execute(
+            f"DELETE FROM document_lignes WHERE document_id IN ({placeholders})",
+            ids,
+        )
+        cur.execute(
+            f"DELETE FROM documents WHERE id IN ({placeholders})",
+            ids,
+        )
+
     def delete_selected_client(self):
         if not hasattr(self, "clients_tree"):
             messagebox.showerror(t("common.error"), t("clients.error_no_list"))
@@ -8108,41 +8177,32 @@ class MainApp(ctk.CTkToplevel):
             cur.execute(
                 "SELECT COUNT(*) FROM documents WHERE client_id = ?", (client_id,)
             )
-            docs_count = cur.fetchone()[0] if cur.fetchone() is not None else 0
-        except Exception:
-            docs_count = 0
-        try:
-            if docs_count and docs_count > 0:
+            row = cur.fetchone()
+            docs_count = row[0] if row else 0
+
+            if docs_count > 0:
                 if not messagebox.askyesno(
                     t("common.confirm"),
-                    f"Le client a {docs_count} document(s). Supprimer le client ET ses documents/paiements associés ?",
+                    t("clients.confirm_delete_with_docs", count=docs_count),
                     icon="warning",
                 ):
                     return
+            elif not messagebox.askyesno(
+                t("common.confirm"), t("clients.confirm_delete")
+            ):
+                return
 
-                cur.execute(
-                    "SELECT id FROM documents WHERE client_id = ?", (client_id,)
-                )
-                doc_ids = [r[0] for r in cur.fetchall()]
-                if doc_ids:
-                    cur.executemany(
-                        "DELETE FROM payments WHERE document_id = ?",
-                        [(d,) for d in doc_ids],
-                    )
-                    cur.execute(
-                        "DELETE FROM documents WHERE client_id = ?", (client_id,)
-                    )
-            else:
-                if not messagebox.askyesno(
-                    t("common.confirm"), t("clients.confirm_delete")
-                ):
-                    return
+            cur.execute("SELECT id FROM documents WHERE client_id = ?", (client_id,))
+            doc_ids = [r[0] for r in cur.fetchall()]
+            self._delete_documents_cascade(cur, doc_ids)
 
             cur.execute("DELETE FROM clients WHERE id = ?", (client_id,))
             conn.commit()
         except Exception as e:
             conn.rollback()
-            messagebox.showerror(t("common.error"), f"Erreur lors de la suppression : {e}")
+            messagebox.showerror(
+                t("common.error"), t("clients.error_delete", error=str(e))
+            )
             return
         finally:
             conn.close()
@@ -8155,6 +8215,15 @@ class MainApp(ctk.CTkToplevel):
             self.load_paiements()
         except Exception:
             pass
+        try:
+            self.load_articles()
+        except Exception:
+            pass
+        for doc_type in ("devis", "bl", "factures", "reception"):
+            try:
+                self.load_documents(doc_type)
+            except Exception:
+                pass
 
         messagebox.showinfo(t("common.deleted"), t("clients.deleted_success"))
 
@@ -8181,31 +8250,23 @@ class MainApp(ctk.CTkToplevel):
             messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_doc_id"))
             return
 
-        if not messagebox.askyesno(
-            t("common.confirm"),
-            t("documents.confirm_delete_irreversible"),
-        ):
-            return
-
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         try:
-            # If this document is the target of a conversion, release the
-            # source so it can be converted again.
-            cur.execute(
-                """
-                UPDATE documents
-                SET converted_to_id = NULL, converted_at = NULL
-                WHERE converted_to_id = ?
-                """,
-                (doc_id,),
-            )
+            cur.execute("SELECT type, statut FROM documents WHERE id = ?", (doc_id,))
+            if not cur.fetchone():
+                messagebox.showerror(
+                    t("common.error"), t("payment_dialog.error_doc_not_found")
+                )
+                return
 
-            cur.execute("DELETE FROM payments WHERE document_id = ?", (doc_id,))
+            if not messagebox.askyesno(
+                t("common.confirm"),
+                t("documents.confirm_delete_irreversible"),
+            ):
+                return
 
-            cur.execute("DELETE FROM document_lignes WHERE document_id = ?", (doc_id,))
-
-            cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            self._delete_documents_cascade(cur, [doc_id])
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -8220,6 +8281,10 @@ class MainApp(ctk.CTkToplevel):
             pass
         try:
             self.load_paiements()
+        except Exception:
+            pass
+        try:
+            self.load_articles()
         except Exception:
             pass
 
