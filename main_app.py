@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 import sqlite3
@@ -37,6 +38,154 @@ except Exception:
     TableStyle = None
     Paragraph = None
     Spacer = None
+
+
+def _parse_finite_number(raw):
+    """Return ``raw`` as a finite float, or None when it is not a number.
+
+    ``float`` accepts ``nan`` and ``inf`` which would poison totals and
+    payment balances, so those are rejected here as well.
+    """
+    if isinstance(raw, bool):
+        return None
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _validate_quantity(raw):
+    value = _parse_finite_number(raw)
+    if value is None or value <= 0:
+        return None
+    return value
+
+
+def _validate_unit_price(raw):
+    value = _parse_finite_number(raw)
+    if value is None or value < 0:
+        return None
+    return value
+
+
+def _validate_percentage(raw):
+    value = _parse_finite_number(raw)
+    if value is None or value < 0 or value > 100:
+        return None
+    return value
+
+
+def _validate_line_inputs(qty_raw, pu_raw, tva_raw):
+    """Validate a document line.
+
+    Returns ``((quantity, unit_price, vat), None)`` on success or
+    ``(None, error_key)`` on failure, where ``error_key`` is an i18n key.
+    """
+    qty = _validate_quantity(qty_raw)
+    if qty is None:
+        return None, "new_doc.error_qty_invalid"
+    pu = _validate_unit_price(pu_raw)
+    if pu is None:
+        return None, "new_doc.error_pu_invalid"
+    tva = _validate_percentage(tva_raw)
+    if tva is None:
+        return None, "new_doc.error_tva_invalid"
+    return (qty, pu, tva), None
+
+
+def _validate_discount_input(enabled, raw):
+    """Validate the optional discount percentage.
+
+    Returns ``(percentage, None)`` on success or ``(None, error_key)``.
+    """
+    if not enabled:
+        return 0.0, None
+    value = _validate_percentage(raw or 0)
+    if value is None:
+        return None, "new_doc.error_discount_invalid"
+    return value, None
+
+
+def _validate_document_date(raw):
+    """Accept ``YYYY-MM-DD`` or ``YYYY-MM-DD HH:MM:SS`` and normalize it."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if fmt == "%Y-%m-%d":
+            return parsed.strftime("%Y-%m-%d 00:00:00")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    return None
+
+
+def _validate_payment_amount(raw, remaining):
+    """Return a positive amount that does not exceed the remaining balance."""
+    amount = _parse_finite_number(raw)
+    if amount is None or amount <= 0:
+        return None
+    if remaining is not None:
+        remaining_value = _parse_finite_number(remaining)
+        if remaining_value is None or remaining_value <= 0:
+            return None
+        if amount > remaining_value + 1e-9:
+            return None
+    return amount
+
+
+def _apply_payment(cursor, document_id, raw_amount, method=None):
+    """Validate and record a payment on an invoice using ``cursor``.
+
+    Returns ``(None, {})`` on success or ``(error_key, kwargs)`` on failure.
+    The caller owns the transaction and must commit or roll back.
+    """
+    cursor.execute(
+        "SELECT type, total_ttc, paid_amount FROM documents WHERE id = ?",
+        (document_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return "payment_dialog.error_doc_not_found", {}
+    if row[0] != "factures":
+        return "payment_dialog.error_not_invoice", {}
+
+    amount = _parse_finite_number(raw_amount)
+    if amount is None:
+        return "payment_dialog.error_invalid_amount", {}
+    if amount <= 0:
+        return "payment_dialog.error_amount_positive", {}
+
+    total_ttc = max(0.0, _parse_finite_number(row[1]) or 0.0)
+    paid = max(0.0, _parse_finite_number(row[2]) or 0.0)
+    remaining = max(0.0, total_ttc - paid)
+    if remaining <= 0:
+        return "payment_dialog.error_nothing_due", {}
+    if amount > remaining + 1e-9:
+        return (
+            "payment_dialog.error_amount_exceeds_remaining",
+            {"remaining": remaining},
+        )
+
+    new_paid = paid + amount
+    date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute(
+        "INSERT INTO payments (document_id, date, amount, method, note) VALUES (?, ?, ?, ?, ?)",
+        (document_id, date_now, amount, method, "Paiement"),
+    )
+    mode = "full" if new_paid >= total_ttc - 1e-9 else "partial"
+    cursor.execute(
+        "UPDATE documents SET paid_amount = ?, payment_mode = ? WHERE id = ?",
+        (new_paid, mode, document_id),
+    )
+    return None, {}
 
 
 class MainApp(ctk.CTkToplevel):
@@ -2884,18 +3033,21 @@ class MainApp(ctk.CTkToplevel):
             tva_sum = 0.0
             for item in lines_tree.get_children():
                 _article_id, _ref, art, qty, pu, tva = lines_tree.item(item, "values")
-                line_ht = float(qty) * float(pu)
-                line_tva = line_ht * (float(tva) / 100.0)
+                values, error_key = _validate_line_inputs(qty, pu, tva)
+                if error_key:
+                    continue
+                qty_f, pu_f, tva_f = values
+                line_ht = qty_f * pu_f
+                line_tva = line_ht * (tva_f / 100.0)
                 ht += line_ht
                 tva_sum += line_tva
 
             discount_percent = 0.0
             discount_amount = 0.0
             if discount_enabled_var.get():
-                try:
-                    discount_percent = float(discount_entry.get().strip() or 0)
-                except ValueError:
-                    discount_percent = 0.0
+                discount_percent = (
+                    _validate_percentage(discount_entry.get().strip() or 0) or 0.0
+                )
                 discount_amount = ht * (discount_percent / 100.0)
 
             ttc = ht + tva_sum - discount_amount
@@ -3148,9 +3300,11 @@ class MainApp(ctk.CTkToplevel):
 
             def update_preview(event=None):
                 try:
-                    qty_f = float(qty_entry.get().strip() or 0)
-                    pu_f = float(pu_entry.get().strip() or 0)
-                    tva_f = float(tva_entry.get().strip() or 0)
+                    qty_f = _parse_finite_number(qty_entry.get().strip() or 0)
+                    pu_f = _parse_finite_number(pu_entry.get().strip() or 0)
+                    tva_f = _parse_finite_number(tva_entry.get().strip() or 0)
+                    if qty_f is None or pu_f is None or tva_f is None:
+                        raise ValueError("non-finite number")
                 except Exception:
                     prev_ht_label.configure(text="HT: -")
                     prev_tva_label.configure(text="TVA: -")
@@ -3176,13 +3330,13 @@ class MainApp(ctk.CTkToplevel):
                 if not display_value:
                     messagebox.showerror(t("common.error"), t("new_doc.error_choose_article"))
                     return
-                try:
-                    qty = float(qty_entry.get().strip())
-                    pu = float(pu_entry.get().strip())
-                    tva = float(tva_entry.get().strip())
-                except ValueError:
-                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_invalid"))
+                values, error_key = _validate_line_inputs(
+                    qty_entry.get(), pu_entry.get(), tva_entry.get()
+                )
+                if error_key:
+                    messagebox.showerror(t("common.error"), t(error_key))
                     return
+                qty, pu, tva = values
 
                 # Extract article ID and reference from display value (format: "ID - REF - Designation")
                 article_id = None
@@ -3200,6 +3354,10 @@ class MainApp(ctk.CTkToplevel):
                             designation = parts[2]
                         else:
                             designation = display_value
+
+                if article_id is None:
+                    messagebox.showerror(t("common.error"), t("new_doc.error_choose_article"))
+                    return
 
                 lines_tree.insert(
                     "", "end", values=(article_id, reference, designation, qty, pu, tva)
@@ -3494,16 +3652,16 @@ class MainApp(ctk.CTkToplevel):
                     conn.close()
 
                 if article_id is None:
-                    messagebox.showerror(t("common.error"), "Article invalide")
+                    messagebox.showerror(t("common.error"), t("new_doc.error_choose_article"))
                     return
 
-                try:
-                    qty = float(qty_entry.get().strip())
-                    pu = float(pu_entry.get().strip())
-                    tva = float(tva_entry.get().strip())
-                except ValueError:
-                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_tva_invalid"))
+                values, error_key = _validate_line_inputs(
+                    qty_entry.get(), pu_entry.get(), tva_entry.get()
+                )
+                if error_key:
+                    messagebox.showerror(t("common.error"), t(error_key))
                     return
+                qty, pu, tva = values
 
                 lines_tree.item(item, values=(article_id, reference, designation, qty, pu, tva))
                 recalc_total()
@@ -3684,34 +3842,56 @@ class MainApp(ctk.CTkToplevel):
         def save_document():
             client_name = client_combo.get().strip()
             client_id = client_map.get(client_name) if client_name else None
+            if client_id is None:
+                messagebox.showerror(
+                    t("common.error"), t("new_doc.error_client_required")
+                )
+                return
+
+            items = lines_tree.get_children()
+            if not items:
+                messagebox.showerror(t("common.error"), t("new_doc.error_no_lines"))
+                return
+
+            # Validate every line before touching the database so a bad row
+            # cannot leave a half-saved document behind.
+            validated_lines = []
+            ht = 0.0
+            tva_sum = 0.0
+            for item in items:
+                article_id, _ref, art, qty, pu, tva = lines_tree.item(
+                    item, "values"
+                )
+                values, error_key = _validate_line_inputs(qty, pu, tva)
+                if error_key:
+                    messagebox.showerror(t("common.error"), t(error_key))
+                    return
+                qty_f, pu_f, tva_f = values
+                line_ht = qty_f * pu_f
+                line_tva = line_ht * (tva_f / 100.0)
+                ht += line_ht
+                tva_sum += line_tva
+                validated_lines.append(
+                    (article_id, art, qty_f, pu_f, tva_f, line_ht, line_tva)
+                )
+
+            discount_percent, error_key = _validate_discount_input(
+                discount_enabled_var.get(), discount_entry.get()
+            )
+            if error_key:
+                messagebox.showerror(t("common.error"), t(error_key))
+                return
+
+            discount_amount = ht * (discount_percent / 100.0)
+            total_ttc = ht + tva_sum - discount_amount
+            if total_ttc < 0:
+                total_ttc = 0.0
+
+            doc_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             try:
-                doc_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                # Calculate totals
-                ht = 0.0
-                tva_sum = 0.0
-                for item in lines_tree.get_children():
-                    _article_id, _ref, art, qty, pu, tva = lines_tree.item(item, "values")
-                    line_ht = float(qty) * float(pu)
-                    line_tva = line_ht * (float(tva) / 100.0)
-                    ht += line_ht
-                    tva_sum += line_tva
-                
-                discount_percent = 0.0
-                if discount_enabled_var.get():
-                    try:
-                        discount_percent = float(discount_entry.get().strip() or 0)
-                    except ValueError:
-                        discount_percent = 0.0
-                
-                discount_amount = ht * (discount_percent / 100.0)
-                total_ttc = ht + tva_sum - discount_amount
-                if total_ttc < 0:
-                    total_ttc = 0.0
-                
                 cursor.execute(
                     """
                     INSERT INTO documents (type, numero, date, client_id, statut, total_ht, total_tva, total_ttc, paid_amount, payment_mode, discount_enabled, discount_value)
@@ -3734,13 +3914,15 @@ class MainApp(ctk.CTkToplevel):
                 )
                 doc_id = cursor.lastrowid
 
-                for item in lines_tree.get_children():
-                    article_id, ref, art, qty, pu, tva = lines_tree.item(item, "values")
-                    qty_f = float(qty)
-                    pu_f = float(pu)
-                    tva_f = float(tva)
-                    line_ht = qty_f * pu_f
-                    line_tva = line_ht * (tva_f / 100.0)
+                for (
+                    article_id,
+                    art,
+                    qty_f,
+                    pu_f,
+                    tva_f,
+                    line_ht,
+                    line_tva,
+                ) in validated_lines:
                     line_ttc = line_ht + line_tva
                     cursor.execute(
                         """
@@ -3761,6 +3943,12 @@ class MainApp(ctk.CTkToplevel):
                     )
 
                 conn.commit()
+            except Exception as e:
+                conn.rollback()
+                messagebox.showerror(
+                    t("common.error"), t("documents.error_save", error=str(e))
+                )
+                return
             finally:
                 conn.close()
 
@@ -3983,19 +4171,25 @@ class MainApp(ctk.CTkToplevel):
         total_tva_value = f"{float(total_tva or 0):.2f}"
         total_ttc_value = f"{float(total_ttc or 0):.2f}"
 
-        # Payment section (left side)
-        payment_frame = ctk.CTkFrame(totals_bar, fg_color="transparent")
-        payment_frame.pack(side="left", padx=(0, 20))
+        # Payment section (left side) - only invoices can receive payments.
+        pay_entry = None
+        pay_method = None
+        if doc_type == "factures":
+            payment_frame = ctk.CTkFrame(totals_bar, fg_color="transparent")
+            payment_frame.pack(side="left", padx=(0, 20))
 
-        ctk.CTkLabel(
-            payment_frame, text=t("doc_details.payment_heading"), font=self.ui.get("font_body")
-        ).pack(anchor="w")
-        pay_entry = ctk.CTkEntry(payment_frame, width=140, placeholder_text=t("new_doc.discount_amount_label"))
-        pay_entry.pack(anchor="w", pady=(4, 6))
-        pay_method = ctk.CTkEntry(
-            payment_frame, width=140, placeholder_text=t("doc_details.payment_method_placeholder")
-        )
-        pay_method.pack(anchor="w")
+            ctk.CTkLabel(
+                payment_frame, text=t("doc_details.payment_heading"), font=self.ui.get("font_body")
+            ).pack(anchor="w")
+            pay_entry = ctk.CTkEntry(payment_frame, width=140, placeholder_text=t("new_doc.discount_amount_label"))
+            pay_entry.pack(anchor="w", pady=(4, 6))
+            pay_method = ctk.CTkEntry(
+                payment_frame, width=140, placeholder_text=t("doc_details.payment_method_placeholder")
+            )
+            pay_method.pack(anchor="w")
+            if is_locked:
+                pay_entry.configure(state="disabled")
+                pay_method.configure(state="disabled")
 
         # Discount controls (middle - right of payment)
         discount_frame = ctk.CTkFrame(totals_bar, fg_color="transparent")
@@ -4125,12 +4319,10 @@ class MainApp(ctk.CTkToplevel):
                 _article_id, _ref, _des, qty, pu, tva = lines_tree.item(
                     item, "values"
                 )
-                try:
-                    qty_f = float(qty)
-                    pu_f = float(pu)
-                    tva_f = float(tva)
-                except Exception:
+                values, error_key = _validate_line_inputs(qty, pu, tva)
+                if error_key:
                     continue
+                qty_f, pu_f, tva_f = values
                 line_ht = qty_f * pu_f
                 line_tva = line_ht * (tva_f / 100.0)
                 ht += line_ht
@@ -4139,10 +4331,9 @@ class MainApp(ctk.CTkToplevel):
             discount_percent = 0.0
             discount_amount = 0.0
             if discount_enabled_var.get():
-                try:
-                    discount_percent = float(discount_entry.get().strip() or 0)
-                except ValueError:
-                    discount_percent = 0.0
+                discount_percent = (
+                    _validate_percentage(discount_entry.get().strip() or 0) or 0.0
+                )
                 discount_amount = ht * (discount_percent / 100.0)
             
             ttc = ht + tva_sum - discount_amount
@@ -4219,8 +4410,8 @@ class MainApp(ctk.CTkToplevel):
                 if not row:
                     messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                     return
-                total_ttc = float(row[0] or 0)
-                paid = float(row[1] or 0)
+                total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
+                paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
                 delta = max(0.0, total_ttc - paid)
                 date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if delta > 0:
@@ -4512,9 +4703,11 @@ class MainApp(ctk.CTkToplevel):
 
             def update_preview(event=None):
                 try:
-                    qty_f = float(qty_entry.get().strip() or 0)
-                    pu_f = float(pu_entry.get().strip() or 0)
-                    tva_f = float(tva_entry.get().strip() or 0)
+                    qty_f = _parse_finite_number(qty_entry.get().strip() or 0)
+                    pu_f = _parse_finite_number(pu_entry.get().strip() or 0)
+                    tva_f = _parse_finite_number(tva_entry.get().strip() or 0)
+                    if qty_f is None or pu_f is None or tva_f is None:
+                        raise ValueError("non-finite number")
                 except Exception:
                     prev_ht_label.configure(text="HT: -")
                     prev_tva_label.configure(text="TVA: -")
@@ -4540,13 +4733,13 @@ class MainApp(ctk.CTkToplevel):
                 if not des:
                     messagebox.showerror(t("common.error"), t("article_dialog.error_designation_required"))
                     return
-                try:
-                    qty_f = float(qty_entry.get().strip())
-                    pu_f = float(pu_entry.get().strip())
-                    tva_f = float(tva_entry.get().strip())
-                except ValueError:
-                    messagebox.showerror(t("common.error"), t("new_doc.error_qty_pu_tva_invalid"))
+                values, error_key = _validate_line_inputs(
+                    qty_entry.get(), pu_entry.get(), tva_entry.get()
+                )
+                if error_key:
+                    messagebox.showerror(t("common.error"), t(error_key))
                     return
+                qty_f, pu_f, tva_f = values
 
                 # Get article info from search entry (format: "ID - REF - Designation")
                 display_value = article_search_entry.get().strip()
@@ -4623,34 +4816,60 @@ class MainApp(ctk.CTkToplevel):
                 messagebox.showerror(t("common.error"), t("doc_details.error_number_required"))
                 return
 
+            new_date_value = _validate_document_date(new_date)
+            if new_date_value is None:
+                messagebox.showerror(
+                    t("common.error"), t("doc_details.error_date_invalid")
+                )
+                return
+
             client_name = client_combo.get().strip()
             new_client_id = client_map.get(client_name) if client_name else None
+            if new_client_id is None:
+                messagebox.showerror(
+                    t("common.error"), t("doc_details.error_client_required")
+                )
+                return
 
-            # Recalculate totals from lines
+            items = lines_tree.get_children()
+            if not items:
+                messagebox.showerror(t("common.error"), t("doc_details.error_no_lines"))
+                return
+
+            # Validate every line before touching the database so a bad row
+            # cannot leave the document with partially replaced lines.
+            validated_lines = []
             ht = 0.0
             tva_sum = 0.0
-            for item in lines_tree.get_children():
-                _article_id, _ref, _des, qty, pu, tva = lines_tree.item(
+            for item in items:
+                article_id_val, _ref, des, qty, pu, tva = lines_tree.item(
                     item, "values"
                 )
-                try:
-                    qty_f = float(qty)
-                    pu_f = float(pu)
-                    tva_f = float(tva)
-                except Exception:
-                    continue
+                if not str(des).strip():
+                    messagebox.showerror(
+                        t("common.error"), t("doc_details.error_designation_required")
+                    )
+                    return
+                values, error_key = _validate_line_inputs(qty, pu, tva)
+                if error_key:
+                    messagebox.showerror(t("common.error"), t(error_key))
+                    return
+                qty_f, pu_f, tva_f = values
                 line_ht = qty_f * pu_f
                 line_tva = line_ht * (tva_f / 100.0)
                 ht += line_ht
                 tva_sum += line_tva
-            
-            discount_percent = 0.0
-            if discount_enabled_var.get():
-                try:
-                    discount_percent = float(discount_entry.get().strip() or 0)
-                except ValueError:
-                    discount_percent = 0.0
-            
+                validated_lines.append(
+                    (article_id_val, des, qty_f, pu_f, tva_f, line_ht, line_tva)
+                )
+
+            discount_percent, error_key = _validate_discount_input(
+                discount_enabled_var.get(), discount_entry.get()
+            )
+            if error_key:
+                messagebox.showerror(t("common.error"), t(error_key))
+                return
+
             discount_amount = ht * (discount_percent / 100.0)
             total_ttc = ht + tva_sum - discount_amount
             if total_ttc < 0:
@@ -4658,15 +4877,24 @@ class MainApp(ctk.CTkToplevel):
 
             conn3 = sqlite3.connect(self.db_path)
             cur3 = conn3.cursor()
+            payment_applied = False
             try:
                 cur3.execute(
-                    "SELECT statut FROM documents WHERE id = ?", (document_id,)
+                    "SELECT statut FROM documents WHERE id = ?",
+                    (document_id,),
                 )
                 row = cur3.fetchone()
-                if row and row[0] == "valide":
+                if not row:
+                    messagebox.showerror(
+                        t("common.error"), t("payment_dialog.error_doc_not_found")
+                    )
+                    conn3.rollback()
+                    return
+                if row[0] == "valide":
                     messagebox.showerror(
                         t("common.error"), t("doc_details.error_already_validated")
                     )
+                    conn3.rollback()
                     return
 
                 cur3.execute(
@@ -4679,7 +4907,7 @@ class MainApp(ctk.CTkToplevel):
                     """,
                     (
                         new_numero,
-                        new_date or date_str,
+                        new_date_value,
                         new_client_id,
                         ht,
                         tva_sum,
@@ -4693,26 +4921,22 @@ class MainApp(ctk.CTkToplevel):
                 cur3.execute(
                     "DELETE FROM document_lignes WHERE document_id = ?", (document_id,)
                 )
-                for item in lines_tree.get_children():
-                    article_id_val, _ref, des, qty, pu, tva = lines_tree.item(
-                        item, "values"
-                    )
-                    try:
-                        qty_f = float(qty)
-                        pu_f = float(pu)
-                        tva_f = float(tva)
-                    except Exception:
-                        continue
-
-                    line_ht = qty_f * pu_f
-                    line_tva = line_ht * (tva_f / 100.0)
+                for (
+                    article_id_val,
+                    des,
+                    qty_f,
+                    pu_f,
+                    tva_f,
+                    line_ht,
+                    line_tva,
+                ) in validated_lines:
                     line_ttc = line_ht + line_tva
 
                     art_id = None
                     if article_id_val not in (None, ""):
                         try:
                             art_id = int(float(article_id_val))
-                        except Exception:
+                        except (TypeError, ValueError):
                             art_id = None
 
                     cur3.execute(
@@ -4733,46 +4957,43 @@ class MainApp(ctk.CTkToplevel):
                         ),
                     )
 
-                # Handle payment if amount is entered
-                try:
+                # Payments are validated against the freshly saved total.
+                if pay_entry is not None:
                     amount_str = pay_entry.get().strip()
                     if amount_str:
-                        amount = float(amount_str)
-                        method = pay_method.get().strip() or None
-                        
-                        # Get current paid amount
-                        cur3.execute(
-                            "SELECT paid_amount FROM documents WHERE id = ?",
-                            (document_id,),
+                        error_key, error_kwargs = _apply_payment(
+                            cur3,
+                            document_id,
+                            amount_str,
+                            pay_method.get().strip() or None,
                         )
-                        row = cur3.fetchone()
-                        paid = float(row[0] or 0)
-                        new_paid = min(total_ttc, paid + amount)
-
-                        date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        cur3.execute(
-                            "INSERT INTO payments (document_id, date, amount, method, note) VALUES (?, ?, ?, ?, ?)",
-                            (document_id, date_now, amount, method, "Paiement"),
-                        )
-                        mode = "partial" if new_paid < total_ttc else "full"
-                        cur3.execute(
-                            "UPDATE documents SET paid_amount = ?, payment_mode = ? WHERE id = ?",
-                            (new_paid, mode, document_id),
-                        )
-                        
-                        # Clear payment fields
-                        pay_entry.delete(0, "end")
-                        pay_method.delete(0, "end")
-                except Exception:
-                    pass
+                        if error_key:
+                            conn3.rollback()
+                            messagebox.showerror(
+                                t("common.error"), t(error_key, **error_kwargs)
+                            )
+                            return
+                        payment_applied = True
 
                 conn3.commit()
+            except Exception as e:
+                conn3.rollback()
+                messagebox.showerror(
+                    t("common.error"), t("documents.error_update", error=str(e))
+                )
+                return
             finally:
                 conn3.close()
 
+            if payment_applied:
+                pay_entry.delete(0, "end")
+                pay_method.delete(0, "end")
+
             self.load_documents(doc_type)
             self.load_paiements()
-            messagebox.showinfo("Enregistré", "Document mis à jour")
+            messagebox.showinfo(
+                t("doc_details.saved_title"), t("doc_details.saved_message")
+            )
             dialog.title(f"Détails {title} - {new_numero}")
 
         toolbar = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -5798,8 +6019,8 @@ class MainApp(ctk.CTkToplevel):
             if not row:
                 messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                 return
-            total_ttc = float(row[0] or 0)
-            paid = float(row[1] or 0)
+            total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
+            paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
             delta = max(0.0, total_ttc - paid)
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if delta > 0:
@@ -5884,8 +6105,8 @@ class MainApp(ctk.CTkToplevel):
             row = cursor.fetchone()
             if not row:
                 return
-            total_ttc = float(row[0] or 0)
-            paid = float(row[1] or 0)
+            total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
+            paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
             delta = max(0.0, total_ttc - paid)
 
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -5918,6 +6139,25 @@ class MainApp(ctk.CTkToplevel):
         self.show_add_payment_dialog_for(invoice_id)
 
     def show_add_payment_dialog_for(self, document_id):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT type FROM documents WHERE id = ?", (document_id,))
+            row = cursor.fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            messagebox.showerror(
+                t("common.error"), t("payment_dialog.error_doc_not_found")
+            )
+            return
+        if row[0] != "factures":
+            messagebox.showerror(
+                t("common.error"), t("payment_dialog.error_not_invoice")
+            )
+            return
+
         dialog = ctk.CTkToplevel(self)
         dialog.title(t("paiements.button_record_payment"))
         dialog.geometry("420x280")
@@ -5939,40 +6179,27 @@ class MainApp(ctk.CTkToplevel):
         method_entry.pack(pady=(0, 10))
 
         def save_payment():
-            try:
-                amount = float(amount_entry.get().strip())
-            except ValueError:
-                messagebox.showerror(t("common.error"), t("payment_dialog.error_invalid_amount"))
-                return
             method = method_entry.get().strip() or None
 
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             try:
-                cursor.execute(
-                    "SELECT total_ttc, paid_amount FROM documents WHERE id = ?",
-                    (document_id,),
+                error_key, error_kwargs = _apply_payment(
+                    cursor, document_id, amount_entry.get().strip(), method
                 )
-                row = cursor.fetchone()
-                if not row:
-                    messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
+                if error_key:
+                    conn.rollback()
+                    messagebox.showerror(
+                        t("common.error"), t(error_key, **error_kwargs)
+                    )
                     return
-                total_ttc = float(row[0] or 0)
-                paid = float(row[1] or 0)
-                new_paid = min(total_ttc, paid + amount)
-
-                date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                cursor.execute(
-                    "INSERT INTO payments (document_id, date, amount, method, note) VALUES (?, ?, ?, ?, ?)",
-                    (document_id, date_now, amount, method, "Paiement"),
-                )
-
-                mode = "partial" if new_paid < total_ttc else "full"
-                cursor.execute(
-                    "UPDATE documents SET paid_amount = ?, payment_mode = ? WHERE id = ?",
-                    (new_paid, mode, document_id),
-                )
                 conn.commit()
+            except Exception as e:
+                conn.rollback()
+                messagebox.showerror(
+                    t("common.error"), t("documents.error_save", error=str(e))
+                )
+                return
             finally:
                 conn.close()
 
