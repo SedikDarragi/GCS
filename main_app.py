@@ -1,5 +1,6 @@
 import math
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -186,6 +187,58 @@ def _apply_payment(cursor, document_id, raw_amount, method=None):
         (new_paid, mode, document_id),
     )
     return None, {}
+
+
+_NUMERO_PREFIXES = {
+    "devis": "DEV",
+    "bl": "BL",
+    "factures": "FAC",
+    "reception": "BR",
+}
+_NUMERO_PATTERN = re.compile(r"^([A-Z]+)-(\d{4})-(\d+)$")
+
+
+def _numero_prefix(doc_type):
+    return _NUMERO_PREFIXES.get(doc_type, str(doc_type).upper())
+
+
+def _numero_counter(numero, prefix, annee):
+    """Return the counter of ``numero`` for ``prefix``/``annee``, else 0."""
+    if not isinstance(numero, str):
+        return 0
+    match = _NUMERO_PATTERN.fullmatch(numero.strip().upper())
+    if not match or match.group(1) != prefix:
+        return 0
+    if int(match.group(2)) != annee:
+        return 0
+    return int(match.group(3))
+
+
+def _max_document_counter(cursor, doc_type, prefix, annee):
+    """Highest existing counter for this type/year, so sequences can catch up."""
+    cursor.execute(
+        "SELECT numero FROM documents WHERE type = ? AND numero LIKE ?",
+        (doc_type, f"{prefix}-{annee}-%"),
+    )
+    return max(
+        (_numero_counter(row[0], prefix, annee) for row in cursor.fetchall()),
+        default=0,
+    )
+
+
+def _numero_exists(cursor, numero, exclude_id=None):
+    """Whether ``numero`` is already used (optionally ignoring ``exclude_id``)."""
+    if exclude_id is None:
+        cursor.execute(
+            "SELECT 1 FROM documents WHERE UPPER(TRIM(numero)) = UPPER(?)",
+            (numero,),
+        )
+    else:
+        cursor.execute(
+            "SELECT 1 FROM documents WHERE UPPER(TRIM(numero)) = UPPER(?) AND id <> ?",
+            (numero, exclude_id),
+        )
+    return cursor.fetchone() is not None
 
 
 class MainApp(ctk.CTkToplevel):
@@ -1375,46 +1428,84 @@ class MainApp(ctk.CTkToplevel):
         finally:
             conn.close()
 
-    def get_next_numero(self, doc_type):
+    def peek_next_numero(self, doc_type):
+        """Preview the next number without reserving it.
+
+        The preview is derived from both the stored sequence and the highest
+        number already used by an existing document, so imported or manually
+        numbered documents cannot cause a duplicate.
+        """
         annee = datetime.now().year
+        prefix = _numero_prefix(doc_type)
+
         conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT annee, compteur FROM sequences WHERE type = ?", (doc_type,)
+            )
+            row = cursor.fetchone()
+            compteur = 0
+            if row and row[0] == annee:
+                compteur = max(int(row[1]), 0)
+            compteur = max(
+                compteur,
+                _max_document_counter(cursor, doc_type, prefix, annee),
+            )
+        finally:
+            conn.close()
+
+        return f"{prefix}-{annee}-{compteur + 1:04d}"
+
+    def get_next_numero(self, doc_type, cursor=None):
+        """Reserve and return the next document number.
+
+        When ``cursor`` is provided the sequence is updated inside the
+        caller's transaction; otherwise a short ``BEGIN IMMEDIATE``
+        transaction makes the reservation atomic across app instances.
+        """
+        annee = datetime.now().year
+        prefix = _numero_prefix(doc_type)
+        own_conn = cursor is None
+        conn = None
+        if own_conn:
+            conn = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+
         try:
             cursor.execute(
                 "SELECT annee, compteur FROM sequences WHERE type = ?", (doc_type,)
             )
             row = cursor.fetchone()
-            if not row:
-                compteur = 1
-                cursor.execute(
-                    "INSERT INTO sequences (type, annee, compteur) VALUES (?, ?, ?)",
-                    (doc_type, annee, compteur),
-                )
-            else:
-                row_annee, row_compteur = row
-                if row_annee != annee:
-                    compteur = 1
-                    cursor.execute(
-                        "UPDATE sequences SET annee = ?, compteur = ? WHERE type = ?",
-                        (annee, compteur, doc_type),
-                    )
-                else:
-                    compteur = row_compteur + 1
-                    cursor.execute(
-                        "UPDATE sequences SET compteur = ? WHERE type = ?",
-                        (compteur, doc_type),
-                    )
+            compteur = 0
+            if row and row[0] == annee:
+                compteur = max(int(row[1]), 0)
+            compteur = max(
+                compteur,
+                _max_document_counter(cursor, doc_type, prefix, annee),
+            )
+            compteur += 1
 
-            conn.commit()
+            cursor.execute(
+                """
+                INSERT INTO sequences (type, annee, compteur) VALUES (?, ?, ?)
+                ON CONFLICT(type) DO UPDATE SET
+                    annee = excluded.annee,
+                    compteur = excluded.compteur
+                """,
+                (doc_type, annee, compteur),
+            )
+
+            if own_conn:
+                conn.commit()
+        except Exception:
+            if own_conn:
+                conn.rollback()
+            raise
         finally:
-            conn.close()
-
-        prefix = {
-            "devis": "DEV",
-            "bl": "BL",
-            "factures": "FAC",
-            "reception": "BR",
-        }.get(doc_type, doc_type.upper())
+            if own_conn and conn is not None:
+                conn.close()
 
         return f"{prefix}-{annee}-{compteur:04d}"
 
@@ -2971,7 +3062,7 @@ class MainApp(ctk.CTkToplevel):
         top = ctk.CTkFrame(dialog, fg_color="transparent")
         top.pack(fill="x", padx=20, pady=15)
 
-        numero = self.get_next_numero(doc_type)
+        numero = self.peek_next_numero(doc_type)
         ctk.CTkLabel(top, text=t("new_doc.label_number", number=numero), font=("Arial", 14, "bold")).pack(
             side="left"
         )
@@ -3892,6 +3983,9 @@ class MainApp(ctk.CTkToplevel):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             try:
+                # The dialog only previewed this number; reserve the real one
+                # inside the same transaction that creates the document.
+                numero = self.get_next_numero(doc_type, cursor=cursor)
                 cursor.execute(
                     """
                     INSERT INTO documents (type, numero, date, client_id, statut, total_ht, total_tva, total_ttc, paid_amount, payment_mode, discount_enabled, discount_value)
@@ -4897,6 +4991,14 @@ class MainApp(ctk.CTkToplevel):
                     conn3.rollback()
                     return
 
+                if _numero_exists(cur3, new_numero, exclude_id=document_id):
+                    conn3.rollback()
+                    messagebox.showerror(
+                        t("common.error"),
+                        t("doc_details.error_number_duplicate", number=new_numero),
+                    )
+                    return
+
                 cur3.execute(
                     """
                     UPDATE documents
@@ -5108,7 +5210,7 @@ class MainApp(ctk.CTkToplevel):
                     )
                     return
 
-            new_numero = self.get_next_numero(to_type)
+            new_numero = self.get_next_numero(to_type, cursor=cursor)
             new_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             source_bl_id = doc_id if to_type == "factures" else None
 

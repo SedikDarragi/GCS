@@ -76,6 +76,8 @@ No cloud, no subscription — your data stays in a local `commercial.db` SQLite 
 ### Document & Business Logic
 
 *   Annual sequential numbering per document type (`sequences` table) — auto-resets each year
+*   Numbers are previewed when a dialog opens and reserved atomically on save, so cancelling or failing never consumes a number
+*   The sequence reconciles with the highest existing document number, and manual edits reject duplicate numbers
 *   TVA / HT / TTC calculations, discount (`remise`) support per document
 *   Document lifecycle: `brouillon` → `validé` → conversion (Devis → BL → Facture)
 *   Stock awareness and payment mode / échéance handling
@@ -285,7 +287,7 @@ python -m pytest tests/test_security.py -v
 | Suite | Covers |
 |---|---|
 | `test_security.py` | Hash format, salt uniqueness, correct/wrong password, malformed/empty, legacy plaintext migration |
-| `test_database.py` | Schema creation, idempotency, data preservation, `get_next_numero` prefixes / increments / year rollover |
+| `test_database.py` | Schema creation, idempotency, data preservation, `get_next_numero` prefixes / increments / year rollover, `peek_next_numero` preview without reservation, sequence reconciliation and duplicate-number protection |
 | `test_db_path.py` | Absolute path, co-location with scripts |
 
 ---
