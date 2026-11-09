@@ -11,7 +11,16 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
-from main import DB_PATH, verify_password
+from accounts import (
+    AccountError,
+    admin_create_user,
+    admin_delete_user,
+    admin_update_user,
+    ensure_account_schema,
+    get_user_by_id,
+    require_admin,
+)
+from main import DB_PATH, prompt_password_change, verify_password
 from i18n import get_language, set_language, t
 
 try:
@@ -348,11 +357,27 @@ class MainApp(ctk.CTkToplevel):
         except Exception:
             pass
 
-        self.user = {
-            "id": user[0],
-            "username": user[1],
-            "is_admin": user[5] if len(user) > 5 else 0,
-        }
+        if isinstance(user, dict):
+            self.user = {
+                "id": user.get("id"),
+                "username": user.get("username", ""),
+                "email": user.get("email", ""),
+                "full_name": user.get("full_name", ""),
+                "is_admin": bool(user.get("is_admin")),
+                "must_change_password": bool(
+                    user.get("must_change_password")
+                ),
+            }
+        else:
+            # Backward compatibility for callers passing the old tuple row.
+            self.user = {
+                "id": user[0],
+                "username": user[1],
+                "is_admin": bool(user[5]) if len(user) > 5 else False,
+                "email": user[3] if len(user) > 3 else "",
+                "full_name": user[4] if len(user) > 4 else "",
+                "must_change_password": False,
+            }
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -526,6 +551,17 @@ class MainApp(ctk.CTkToplevel):
         ctk.CTkLabel(
             user_frame, text=f"{self.user['username']}", font=("Arial", 12, "bold")
         ).pack(anchor="w")
+
+        self.change_password_btn = ctk.CTkButton(
+            user_frame,
+            text=t("sidebar.change_password"),
+            command=self.open_change_password_dialog,
+            fg_color=self.ui["sidebar_btn_fg"],
+            text_color=self.ui["sidebar_btn_text"],
+            hover_color=self.ui["sidebar_btn_hover"],
+            width=120,
+        )
+        self.change_password_btn.pack(pady=(10, 4), fill="x")
 
         self.logout_btn = ctk.CTkButton(
             user_frame,
@@ -857,8 +893,252 @@ class MainApp(ctk.CTkToplevel):
             new_tags = (zebra_tag,) + current_tags
             tree.item(item, tags=new_tags)
 
+    def _require_admin(self):
+        """Confirm against the database that the session user is still admin."""
+        if not self.user.get("id"):
+            messagebox.showerror(
+                t("common.error"), t("admin.error_not_authorized")
+            )
+            return False
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            require_admin(conn, self.user["id"])
+        except AccountError:
+            messagebox.showerror(
+                t("common.error"), t("admin.error_not_authorized")
+            )
+            return False
+        except Exception as e:
+            messagebox.showerror(t("common.error"), str(e))
+            return False
+        finally:
+            conn.close()
+        return True
+
+    def open_change_password_dialog(self):
+        if not self.user.get("id"):
+            return
+        prompt_password_change(self, self.user["id"], self.db_path)
+
+    def _admin_user_dialog(self, parent, user_id=None, on_success=None):
+        if not self._require_admin():
+            return
+
+        existing = None
+        if user_id is not None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                existing = get_user_by_id(conn, user_id)
+            finally:
+                conn.close()
+            if not existing:
+                messagebox.showerror(
+                    t("common.error"), t("validation.user_not_found")
+                )
+                return
+
+        title = (
+            t("admin.user_dialog_edit_title")
+            if existing
+            else t("admin.user_dialog_create_title")
+        )
+        dialog = ctk.CTkToplevel(parent)
+        dialog.title(title)
+        dialog.geometry("440x580")
+        dialog.resizable(False, False)
+        try:
+            dialog.transient(parent)
+            dialog.grab_set()
+        except Exception:
+            pass
+
+        ctk.CTkLabel(
+            dialog, text=title, font=("Arial", 16, "bold")
+        ).pack(pady=(14, 4), padx=20)
+
+        fields = {}
+
+        def add_field(key, label, show=None, value=""):
+            ctk.CTkLabel(dialog, text=label).pack(
+                anchor="w", padx=30, pady=(4, 0)
+            )
+            entry = ctk.CTkEntry(dialog, width=360, show=show)
+            entry.pack(padx=30, pady=(2, 4))
+            if value:
+                entry.insert(0, value)
+            fields[key] = entry
+            return entry
+
+        username_entry = add_field(
+            "username",
+            t("admin.user_username"),
+            value=existing["username"] if existing else "",
+        )
+        if existing:
+            username_entry.configure(state="disabled")
+        add_field(
+            "email",
+            t("admin.user_email"),
+            value=existing["email"] if existing else "",
+        )
+        add_field(
+            "fullname",
+            t("admin.user_fullname"),
+            value=existing["full_name"] if existing else "",
+        )
+
+        if existing:
+            ctk.CTkLabel(
+                dialog,
+                text=t("admin.user_password_hint"),
+                text_color="gray",
+            ).pack(anchor="w", padx=30)
+        add_field(
+            "password", t("admin.user_password"), show="*"
+        )
+        add_field(
+            "confirm", t("admin.user_confirm_password"), show="*"
+        )
+
+        is_admin_var = tk.BooleanVar(
+            value=bool(existing["is_admin"]) if existing else False
+        )
+        is_active_var = tk.BooleanVar(
+            value=bool(existing["is_active"]) if existing else True
+        )
+        ctk.CTkCheckBox(
+            dialog, text=t("admin.user_admin"), variable=is_admin_var
+        ).pack(anchor="w", padx=30, pady=(6, 0))
+        ctk.CTkCheckBox(
+            dialog, text=t("admin.user_active"), variable=is_active_var
+        ).pack(anchor="w", padx=30, pady=(4, 0))
+
+        def submit():
+            password = fields["password"].get()
+            confirm = fields["confirm"].get()
+
+            if bool(password) != bool(confirm):
+                messagebox.showerror(
+                    t("common.error"), t("validation.password_mismatch")
+                )
+                return
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                if existing:
+                    updated = admin_update_user(
+                        conn,
+                        self.user["id"],
+                        existing["id"],
+                        fields["email"].get(),
+                        fields["fullname"].get(),
+                        is_admin_var.get(),
+                        is_active_var.get(),
+                        new_password=password or None,
+                        confirm_password=confirm,
+                    )
+                    if existing["id"] == self.user.get("id"):
+                        self.user.update(updated)
+                else:
+                    admin_create_user(
+                        conn,
+                        self.user["id"],
+                        fields["username"].get(),
+                        password,
+                        fields["email"].get(),
+                        fields["fullname"].get(),
+                        is_admin=is_admin_var.get(),
+                        must_change_password=True,
+                    )
+            except AccountError as exc:
+                conn.rollback()
+                messagebox.showerror(
+                    t("common.error"), t(exc.key, **exc.kwargs)
+                )
+                return
+            except Exception as exc:
+                conn.rollback()
+                messagebox.showerror(t("common.error"), str(exc))
+                return
+            finally:
+                conn.close()
+
+            messagebox.showinfo(
+                t("msgbox.success"),
+                t("admin.user_updated")
+                if existing
+                else t("admin.user_created"),
+            )
+            dialog.destroy()
+            if on_success:
+                on_success()
+
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(pady=(12, 12))
+        ctk.CTkButton(
+            buttons, text=t("common.save"), command=submit, width=140
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            buttons,
+            text=t("common.cancel"),
+            command=dialog.destroy,
+            fg_color="gray",
+            hover_color="darkgray",
+            width=140,
+        ).pack(side="left", padx=6)
+
+        try:
+            (fields["email"] if existing else username_entry).focus_set()
+        except Exception:
+            pass
+
+    def _admin_delete_user(self, parent, user_id, on_success=None):
+        if not self._require_admin():
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            user = get_user_by_id(conn, user_id)
+        finally:
+            conn.close()
+        if not user:
+            messagebox.showerror(
+                t("common.error"), t("validation.user_not_found")
+            )
+            return
+        if not messagebox.askyesno(
+            t("admin.button_delete_user"),
+            t("admin.confirm_delete_user", username=user["username"]),
+        ):
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            admin_delete_user(conn, self.user["id"], user_id)
+        except AccountError as exc:
+            conn.rollback()
+            messagebox.showerror(
+                t("common.error"), t(exc.key, **exc.kwargs)
+            )
+            return
+        except Exception as exc:
+            conn.rollback()
+            messagebox.showerror(t("common.error"), str(exc))
+            return
+        finally:
+            conn.close()
+
+        messagebox.showinfo(
+            t("msgbox.success"), t("admin.user_deleted")
+        )
+        if on_success:
+            on_success()
+
     def open_admin_settings(self):
         """Open administration settings in a separate French-titled window."""
+        if not self._require_admin():
+            return
         try:
             admin_win = ctk.CTkToplevel(self)
 
@@ -925,12 +1205,19 @@ class MainApp(ctk.CTkToplevel):
 
                 tree_frame = ctk.CTkFrame(detail, fg_color="transparent")
                 tree_frame.pack(fill="both", expand=True)
-                cols = ("ID", t("login.username_placeholder"), t("register.email_placeholder"), t("register.fullname_placeholder"), t("admin.col_admin"))
+                cols = (
+                    "ID",
+                    t("login.username_placeholder"),
+                    t("register.email_placeholder"),
+                    t("register.fullname_placeholder"),
+                    t("admin.col_admin"),
+                    t("admin.col_active"),
+                )
                 users_tree = ttk.Treeview(tree_frame, columns=cols, show="headings")
                 for c in cols:
                     users_tree.heading(c, text=c)
-                    users_tree.column(c, width=120, anchor="center")
-                users_tree.column(t("register.email_placeholder"), width=200, anchor="w")
+                    users_tree.column(c, width=110, anchor="center")
+                users_tree.column(t("register.email_placeholder"), width=190, anchor="w")
                 scrollbar = ttk.Scrollbar(
                     tree_frame, orient="vertical", command=users_tree.yview
                 )
@@ -938,40 +1225,91 @@ class MainApp(ctk.CTkToplevel):
                 users_tree.configure(yscrollcommand=scrollbar.set)
                 users_tree.pack(fill="both", expand=True)
 
-                try:
-                    conn = sqlite3.connect(self.db_path)
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT id, username, email, full_name, is_admin FROM users ORDER BY username"
-                    )
-                    for r in cur.fetchall():
-                        users_tree.insert(
-                            "",
-                            "end",
-                            values=(
-                                r[0],
-                                r[1],
-                                r[2] or "",
-                                r[3] or "",
-                                t("common.yes") if r[4] else t("common.no"),
-                            ),
-                        )
-                except Exception as e:
-                    print(f"Failed to load users for admin panel: {e}")
-                finally:
+                def populate_users():
+                    for item in users_tree.get_children():
+                        users_tree.delete(item)
+                    conn = None
                     try:
-                        conn.close()
-                    except Exception:
-                        pass
+                        conn = sqlite3.connect(self.db_path)
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT id, username, email, full_name, is_admin, is_active "
+                            "FROM users ORDER BY username"
+                        )
+                        for r in cur.fetchall():
+                            users_tree.insert(
+                                "",
+                                "end",
+                                values=(
+                                    r[0],
+                                    r[1],
+                                    r[2] or "",
+                                    r[3] or "",
+                                    t("common.yes") if r[4] else t("common.no"),
+                                    t("common.yes") if r[5] else t("common.no"),
+                                ),
+                            )
+                    except Exception as e:
+                        print(f"Failed to load users for admin panel: {e}")
+                    finally:
+                        if conn is not None:
+                            conn.close()
+
+                def selected_user_id():
+                    selection = users_tree.selection()
+                    if not selection:
+                        messagebox.showinfo(
+                            t("common.error"), t("admin.error_select_user")
+                        )
+                        return None
+                    try:
+                        return int(users_tree.item(selection[0], "values")[0])
+                    except (TypeError, ValueError, IndexError):
+                        return None
+
+                def create_selected():
+                    self._admin_user_dialog(
+                        admin_win, None, on_success=populate_users
+                    )
+
+                def edit_selected():
+                    uid = selected_user_id()
+                    if uid is not None:
+                        self._admin_user_dialog(
+                            admin_win, uid, on_success=populate_users
+                        )
+
+                def delete_selected():
+                    uid = selected_user_id()
+                    if uid is not None:
+                        self._admin_delete_user(
+                            admin_win, uid, on_success=populate_users
+                        )
+
+                populate_users()
+                users_tree.bind(
+                    "<Double-1>", lambda _event: edit_selected()
+                )
 
                 footer = ctk.CTkFrame(detail, fg_color="transparent")
                 footer.pack(fill="x", pady=(8, 0))
                 ctk.CTkButton(
-                    footer, text=t("admin.button_create_user"), state="disabled"
+                    footer,
+                    text=t("admin.button_create_user"),
+                    command=create_selected,
                 ).pack(side="left")
                 ctk.CTkButton(
-                    footer, text=t("admin.button_edit_selection"), state="disabled"
+                    footer,
+                    text=t("admin.button_edit_selection"),
+                    command=edit_selected,
                 ).pack(side="left", padx=8)
+                ctk.CTkButton(
+                    footer,
+                    text=t("admin.button_delete_user"),
+                    command=delete_selected,
+                    fg_color=self.ui.get("danger_fg", "#FF4B4B"),
+                    hover_color=self.ui.get("danger_hover", "#FF0000"),
+                ).pack(side="left")
 
             def show_system_section():
                 clear_detail()
@@ -1147,6 +1485,8 @@ class MainApp(ctk.CTkToplevel):
         If skip_backup is False, offer the user a choice to backup before wiping.
         If skip_backup is True, proceed to wipe without creating any backup.
         """
+        if not self._require_admin():
+            return
         backup_path = None
         if not skip_backup:
             choice = messagebox.askyesnocancel(
@@ -1239,6 +1579,8 @@ class MainApp(ctk.CTkToplevel):
         messagebox.showinfo("Effacer DB", msg)
 
     def _admin_backup_db(self):
+        if not self._require_admin():
+            return
         try:
             path = filedialog.asksaveasfilename(
                 defaultextension=".db",
@@ -1253,6 +1595,8 @@ class MainApp(ctk.CTkToplevel):
             messagebox.showerror(t("admin.backup_title"), t("admin.backup_failed", error=str(e)))
 
     def _admin_restore_db(self):
+        if not self._require_admin():
+            return
         try:
             src = filedialog.askopenfilename(
                 filetypes=[("SQLite DB", "*.db"), ("All files", "*.*")]
@@ -1304,6 +1648,7 @@ class MainApp(ctk.CTkToplevel):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
+            ensure_account_schema(conn)
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS articles (
@@ -8662,6 +9007,8 @@ class MainApp(ctk.CTkToplevel):
         messagebox.showinfo("Export", "Export à implémenter.")
 
     def create_admin_frame(self):
+        if not self._require_admin():
+            return
         frame = ctk.CTkFrame(self.main_frame, corner_radius=0, fg_color="transparent")
 
         header = ctk.CTkFrame(frame, fg_color="transparent")
@@ -8722,6 +9069,8 @@ class MainApp(ctk.CTkToplevel):
         self.frames["admin"] = frame
 
     def wipe_database(self):
+        if not self._require_admin():
+            return
         if not messagebox.askyesno(
             t("admin.critical_confirm_title"),
             "Êtes-vous SÛR de vouloir effacer TOUTE la base de données ?\n\nCette action est irréversible !",

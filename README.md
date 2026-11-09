@@ -111,7 +111,8 @@ No cloud, no subscription — your data stays in a local `commercial.db` SQLite 
 
 ```
 GCS/
-├── main.py              # Login, registration & auth (PBKDF2, DB bootstrap)
+├── main.py              # Login / registration UI and DB bootstrap
+├── accounts.py          # Account model, password hashing, auth, lockout, admin guards
 ├── main_app.py          # Main application — UI, business logic, exports (~8100 lines)
 ├── requirements.txt     # Runtime dependencies
 ├── assets/
@@ -119,6 +120,7 @@ GCS/
 ├── tests/
 │   ├── conftest.py      # headless customtkinter mock
 │   ├── test_security.py # hash / verify / salt tests
+│   ├── test_accounts.py # account model, lockout, roles, password policy
 │   ├── test_database.py # schema, idempotency, sequences
 │   └── test_db_path.py  # DB path resolution
 ├── commercial.db        # Created on first run (gitignored)
@@ -163,14 +165,12 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Login with the seeded admin account:
+Login with the administrator account:
 
-```
-username: admin
-password: admin123
-```
+*   **Username:** `admin`
+*   **Password:** shown once in the startup dialog on first launch (a strong random password), or the value of `GCS_INITIAL_ADMIN_PASSWORD` if you set it before launching.
 
-> Change the default password immediately before any real use.
+> The password must be changed at first login. It is never stored in this README.
 
 ---
 
@@ -199,7 +199,7 @@ password: admin123
     python main.py
     ```
 
-On first launch the app creates `commercial.db` automatically next to `main.py` (absolute path via `DB_PATH` in `main.py:15`), creates the schema, and seeds the `admin` user.
+On first launch the app creates `commercial.db` automatically next to `main.py` (absolute path via `DB_PATH` in `main.py`), creates the schema, and seeds the `admin` user with a one-time generated password.
 
 ---
 
@@ -208,7 +208,7 @@ On first launch the app creates `commercial.db` automatically next to `main.py` 
 ### First Launch
 
 1.  Database is auto-created in the application directory.
-2.  Log in with `admin` / `admin123` or create a new account via registration.
+2.  Note the generated `admin` password from the startup dialog, log in, and choose a new password when prompted.
 3.  Add **Clients** → **Articles** → **Documents**.
 
 ### Navigation
@@ -219,7 +219,7 @@ On first launch the app creates `commercial.db` automatically next to `main.py` 
 | **Clients** | Customer list, search, matricule fiscale |
 | **Devis / BL / Factures / Réception** | Document lists, create / convert / validate |
 | **Paiements / Impayés** | Outstanding amounts per client & per document |
-| **Administration** | (admin only) Backup / Restore / Wipe database |
+| **Administration** | (admin only) Create / edit / disable users, reset passwords, backup / restore / wipe database |
 
 ### Keyboard & Mouse Shortcuts
 
@@ -247,7 +247,7 @@ SQLite file: `commercial.db` — always resolved to `os.path.dirname(__file__)` 
 
 | Table | Purpose |
 |---|---|
-| `users` | `username`, `password` (hashed), `email`, `full_name`, `is_admin` |
+| `users` | `username`, `password` (hashed), `email`, `full_name`, `is_admin`, `is_active`, `must_change_password`, failed-login/lockout metadata |
 | `articles` | `reference`, `designation`, `prix_achat`, `prix_vente`, `tva`, `stock` |
 | `clients` | `nom`, `email`, `telephone`, `adresse`, `matricule_fiscale` |
 | `documents` | `type`, `numero`, `date`, `client_id`, `statut`, `total_ht/tva/ttc`, `paid_amount`, `discount_*` |
@@ -262,13 +262,18 @@ Schema is created/patched idempotently in `MainApp.init_db()` (`main_app.py:869`
 
 ## Security
 
-*   Passwords hashed with **PBKDF2-HMAC-SHA256**, random 16-byte salt, **600,000 iterations** (`main.py:12`).
-*   Stored format: `pbkdf2$600000$<salt_hex>$<dk_hex>` (`main.py:20`).
-*   Verification uses `secrets.compare_digest` (constant-time) and auto-migrates legacy plaintext passwords on next successful login (`main.py:236`).
-*   Destructive admin actions (wipe / restore) require password re-entry and offer a `.backup` copy (`main_app.py:569`, `main_app.py:834`).
-*   `DB_PATH` is absolute — no accidental DB creation in a different working directory (`tests/test_db_path.py:6`).
-
-> Do not ship with `admin/admin123` in production. Create a dedicated admin and delete or rotate the default.
+*   Passwords hashed with **PBKDF2-HMAC-SHA256**, random 16-byte salt, **600,000 iterations** (`accounts.py`).
+*   Stored format: `pbkdf2$600000$<salt_hex>$<dk_hex>`; verification uses `secrets.compare_digest` (constant-time).
+*   Password policy: minimum **8 characters**, maximum 128, common-password rejection, and confirmation checks.
+*   Usernames and emails are unique **case-insensitively**; usernames are limited to letters, digits, dots, dashes and underscores.
+*   **Lockout:** 5 failed attempts lock the account for 15 minutes; attempts are persisted in the database.
+*   Disabled (`is_active = 0`) accounts cannot log in, and the session role is re-checked against the database before every admin operation.
+*   Admin actions guard against deleting yourself, disabling yourself, or removing the last active administrator.
+*   New admin-created users and admin password resets require a password change at next login.
+*   The first administrator is seeded with a one-time random password (or `GCS_INITIAL_ADMIN_PASSWORD`); the published `admin123` default is no longer used.
+*   Legacy plaintext passwords are migrated on next successful login; existing installations that still use `admin123` are forced to change it.
+*   Destructive admin actions (wipe / restore) require password re-entry and offer a `.backup` copy.
+*   `DB_PATH` is absolute — no accidental DB creation in a different working directory (`tests/test_db_path.py`).
 
 ---
 
@@ -287,6 +292,7 @@ python -m pytest tests/test_security.py -v
 | Suite | Covers |
 |---|---|
 | `test_security.py` | Hash format, salt uniqueness, correct/wrong password, malformed/empty, legacy plaintext migration |
+| `test_accounts.py` | Account creation/validation, case-insensitive uniqueness, lockout, inactive accounts, password policy/change, last-admin and self-delete guards |
 | `test_database.py` | Schema creation, idempotency, data preservation, `get_next_numero` prefixes / increments / year rollover, `peek_next_numero` preview without reservation, sequence reconciliation and duplicate-number protection |
 | `test_db_path.py` | Absolute path, co-location with scripts |
 

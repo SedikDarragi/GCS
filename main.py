@@ -1,6 +1,4 @@
-import hashlib
 import os
-import secrets
 import sqlite3
 import webbrowser
 from tkinter import messagebox
@@ -8,49 +6,112 @@ from tkinter import messagebox
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from accounts import (
+    AccountError,
+    authenticate_user,
+    change_password,
+    create_user,
+    ensure_account_schema,
+    get_public_user_by_id,
+    is_password_hashed,
+    hash_password,
+    seed_default_admin,
+    validate_password,
+    verify_password,
+)
 from i18n import get_language, set_language, t
-
-_PBKDF2_ALGO = "pbkdf2"
-_PBKDF2_ITERATIONS = 600000
 
 DB_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "commercial.db"
 )
 
 
-def hash_password(password):
-    salt = secrets.token_bytes(16)
-    dk = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS
-    )
-    return "{}${}${}${}".format(
-        _PBKDF2_ALGO, _PBKDF2_ITERATIONS, salt.hex(), dk.hex()
-    )
+def prompt_password_change(parent, user_id, db_path, force=False):
+    """Show a modal password-change dialog and return True when it succeeds."""
+    changed = {"value": False}
 
+    dialog = ctk.CTkToplevel(parent)
+    dialog.title(t("password_change.title"))
+    dialog.geometry("420x360")
+    dialog.resizable(False, False)
+    try:
+        dialog.transient(parent)
+        dialog.grab_set()
+    except Exception:
+        pass
 
-def verify_password(password, stored):
-    if not isinstance(stored, str) or not stored:
-        return False
+    ctk.CTkLabel(
+        dialog,
+        text=t("password_change.title"),
+        font=("Arial", 16, "bold"),
+    ).pack(pady=(18, 6), padx=20)
+    if force:
+        ctk.CTkLabel(
+            dialog,
+            text=t("password_change.must_change"),
+            wraplength=360,
+            text_color="gray",
+        ).pack(padx=20, pady=(0, 8))
 
-    if not stored.startswith(_PBKDF2_ALGO + "$"):
-        return secrets.compare_digest(password, stored)
+    entries = {}
+    for key, label in (
+        ("current", t("password_change.current")),
+        ("new", t("password_change.new")),
+        ("confirm", t("password_change.confirm")),
+    ):
+        ctk.CTkLabel(dialog, text=label).pack(anchor="w", padx=40)
+        entry = ctk.CTkEntry(dialog, show="*", width=320)
+        entry.pack(padx=40, pady=(2, 8))
+        entries[key] = entry
+
+    def submit():
+        conn = sqlite3.connect(db_path)
+        try:
+            change_password(
+                conn,
+                user_id,
+                entries["current"].get(),
+                entries["new"].get(),
+                entries["confirm"].get(),
+            )
+        except AccountError as exc:
+            messagebox.showerror(
+                t("common.error"), t(exc.key, **exc.kwargs)
+            )
+            return
+        except Exception as exc:
+            messagebox.showerror(t("common.error"), str(exc))
+            return
+        finally:
+            conn.close()
+
+        changed["value"] = True
+        messagebox.showinfo(
+            t("msgbox.success"), t("password_change.success")
+        )
+        dialog.destroy()
+
+    buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+    buttons.pack(pady=(4, 12))
+    ctk.CTkButton(
+        buttons, text=t("common.save"), command=submit, width=140
+    ).pack(side="left", padx=6)
+    ctk.CTkButton(
+        buttons,
+        text=t("common.cancel"),
+        command=dialog.destroy,
+        fg_color="gray",
+        hover_color="darkgray",
+        width=140,
+    ).pack(side="left", padx=6)
 
     try:
-        algo, iterations, salt_hex, hash_hex = stored.split("$", 3)
-        if algo != _PBKDF2_ALGO:
-            return False
-        salt = bytes.fromhex(salt_hex)
-        expected = bytes.fromhex(hash_hex)
-        dk = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, int(iterations)
-        )
-        return secrets.compare_digest(dk, expected)
+        entries["current"].focus_set()
     except Exception:
-        return False
+        pass
 
-
-def is_password_hashed(stored):
-    return isinstance(stored, str) and stored.startswith(_PBKDF2_ALGO + "$")
+    dialog.wait_window()
+    return changed["value"]
 
 
 class LoginWindow(ctk.CTk):
@@ -221,16 +282,7 @@ class LoginWindow(ctk.CTk):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            full_name TEXT NOT NULL,
-            is_admin BOOLEAN DEFAULT 0
-        )
-        """)
+        ensure_account_schema(conn)
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
@@ -261,67 +313,95 @@ class LoginWindow(ctk.CTk):
 
     def create_default_admin(self):
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        try:
+            seeded = seed_default_admin(conn)
+        except AccountError as exc:
+            messagebox.showerror(t("common.error"), t(exc.key, **exc.kwargs))
+            return
+        finally:
+            conn.close()
 
-        cursor.execute("SELECT COUNT(*) FROM users")
-        count = cursor.fetchone()[0]
+        if not seeded:
+            return
 
-        if count == 0:
-
-            cursor.execute(
-            """
-                INSERT INTO users (username, password, email, full_name, is_admin)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-            ("admin", hash_password("admin123"), "admin@example.com", "Administrateur", 1),
-            )
-            conn.commit()
-
-        conn.close()
+        username = seeded["user"]["username"]
+        password = seeded["password"]
+        message = t(
+            "login.default_admin_created",
+            username=username,
+            password=password,
+        )
+        print(message)
+        try:
+            messagebox.showinfo(t("login.default_admin_title"), message)
+        except Exception:
+            pass
 
     def login(self):
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+
+        if not username or not password:
+            messagebox.showerror(t("common.error"), t("login.error_fill_fields"))
+            return
+
+        conn = None
         try:
-            username = self.username_entry.get()
-            password = self.password_entry.get()
-
-            if not username or not password:
-                messagebox.showerror(t("common.error"), t("login.error_fill_fields"))
-                return
-
             conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-            user = cursor.fetchone()
-
-            if user:
-                stored = user[2]
-                if verify_password(password, stored):
-                    if not is_password_hashed(stored):
-                        cursor.execute(
-                        "UPDATE users SET password = ? WHERE id = ?",
-                        (hash_password(password), user[0]),
-                        )
-                        conn.commit()
-                    conn.close()
-                    print(f"User logged in: {username}")
-                    self.withdraw()
-
-                    from main_app import MainApp
-
-                    app = MainApp(user, parent=self)
-
-                    app.protocol("WM_DELETE_WINDOW", lambda: self.on_main_app_close(app))
-                    return
-
-            conn.close()
-            messagebox.showerror(
-            t("common.error"), t("login.error_invalid_credentials")
-            )
-
+            user, status, info = authenticate_user(conn, username, password)
         except Exception as e:
-            messagebox.showerror(t("common.error"), t("login.error_generic", error=str(e)))
+            messagebox.showerror(
+                t("common.error"), t("login.error_generic", error=str(e))
+            )
             print(f"Login error: {str(e)}")
+            return
+        finally:
+            if conn is not None:
+                conn.close()
+
+        if status == "locked":
+            messagebox.showerror(
+                t("common.error"),
+                t("login.error_account_locked", minutes=info.get("minutes", 15)),
+            )
+            return
+        if status == "inactive":
+            messagebox.showerror(
+                t("common.error"), t("login.error_account_inactive")
+            )
+            return
+        if status != "ok" or not user:
+            messagebox.showerror(
+                t("common.error"), t("login.error_invalid_credentials")
+            )
+            return
+
+        if user.get("must_change_password"):
+            if not prompt_password_change(
+                self, user["id"], DB_PATH, force=True
+            ):
+                messagebox.showinfo(
+                    t("common.error"), t("password_change.must_change")
+                )
+                return
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                user = get_public_user_by_id(conn, user["id"]) or user
+            finally:
+                conn.close()
+
+        try:
+            self.password_entry.delete(0, "end")
+        except Exception:
+            pass
+
+        print(f"User logged in: {user['username']}")
+        self.withdraw()
+
+        from main_app import MainApp
+
+        app = MainApp(user, parent=self)
+        app.protocol("WM_DELETE_WINDOW", lambda: self.on_main_app_close(app))
 
     def on_main_app_close(self, main_app):
         """Handle main app closing"""
@@ -526,47 +606,27 @@ class RegisterWindow(ctk.CTkToplevel):
             messagebox.showerror(t("common.error"), t("register.error_fill_fields"))
             return
 
-        if "@" not in email or "." not in email:
-            messagebox.showerror(t("common.error"), t("register.error_invalid_email"))
-            return
-
-        if len(password) < 6:
-            messagebox.showerror(
-            t("common.error"), t("register.error_password_short")
-            )
-            return
-
         if password != confirm_password:
             messagebox.showerror(t("common.error"), t("register.error_password_mismatch"))
             return
 
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
         try:
-            cursor.execute(
-            "INSERT INTO users (username, password, email, full_name, is_admin) VALUES (?, ?, ?, ?, ?)",
-            (
-            username,
-            hash_password(password),
-            email,
-            fullname,
-            0,
-            ),
+            create_user(
+                conn,
+                username,
+                password,
+                email,
+                fullname,
+                is_admin=False,
             )
-            conn.commit()
             messagebox.showinfo(t("register.success_title"), t("register.success_body"))
             self.destroy()
-        except sqlite3.IntegrityError as e:
-            if "username" in str(e).lower():
-                messagebox.showerror(t("common.error"), t("register.error_username_taken"))
-            elif "email" in str(e).lower():
-                messagebox.showerror(t("common.error"), t("register.error_email_taken"))
-            else:
-                messagebox.showerror(t("common.error"), t("register.error_generic", error=str(e)))
+        except AccountError as exc:
+            messagebox.showerror(t("common.error"), t(exc.key, **exc.kwargs))
         except Exception as e:
             messagebox.showerror(
-            t("common.error"), t("register.error_unexpected", error=str(e))
+                t("common.error"), t("register.error_unexpected", error=str(e))
             )
         finally:
             conn.close()

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Centralised, testable account model (`accounts.py`)
+- Password change flow, password reset, and active/administrator user management in the admin panel
+- Failed-login lockout (5 attempts / 15 minutes) and disabled-account support
+- Case-insensitive username/email uniqueness and stronger password policy (8+ characters)
 - Click-to-sort with visual indicators (▲/▼) on all tables
 - Color-coded payment status (green for paid, red for unpaid)
 - Real-time updates for client list when documents/payments change
@@ -20,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced zebra striping with payment status colors
 
 ### Fixed
+- Removed the hardcoded `admin/admin123` bootstrap; first-run admin now gets a one-time random password
+- Session is no longer trusted for admin rights: role and active status are re-checked before admin actions
+- Last active administrator, self-deletion, and self-deactivation are now prevented
 - Client list not updating after document creation
 - Client list not updating after document conversion
 - Client list not updating after document validation
