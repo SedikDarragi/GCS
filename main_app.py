@@ -6,6 +6,7 @@ import tempfile
 import tkinter as tk
 import webbrowser
 from datetime import datetime
+from decimal import Decimal
 from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
@@ -27,6 +28,15 @@ from database_maintenance import (
 )
 from main import DB_PATH, prompt_password_change, verify_password
 from i18n import get_language, set_language, t
+from money import (
+    as_cents,
+    discount_cents,
+    format_money,
+    line_totals,
+    migrate_money_to_cents,
+    money_to_input,
+    parse_money,
+)
 
 try:
     from reportlab.lib import colors
@@ -80,7 +90,7 @@ def _validate_quantity(raw):
 
 
 def _validate_unit_price(raw):
-    value = _parse_finite_number(raw)
+    value = parse_money(raw)
     if value is None or value < 0:
         return None
     return value
@@ -143,15 +153,19 @@ def _validate_document_date(raw):
 
 
 def _validate_payment_amount(raw, remaining):
-    """Return a positive amount that does not exceed the remaining balance."""
-    amount = _parse_finite_number(raw)
+    """Return a positive amount in cents within the remaining balance.
+
+    ``remaining`` is expressed in cents as well.  ``None`` means the caller
+    does not know the balance; the amount is then only checked for positivity.
+    """
+    amount = parse_money(raw)
     if amount is None or amount <= 0:
         return None
     if remaining is not None:
-        remaining_value = _parse_finite_number(remaining)
-        if remaining_value is None or remaining_value <= 0:
+        remaining_value = as_cents(remaining)
+        if remaining_value <= 0:
             return None
-        if amount > remaining_value + 1e-9:
+        if amount > remaining_value:
             return None
     return amount
 
@@ -172,21 +186,21 @@ def _apply_payment(cursor, document_id, raw_amount, method=None):
     if row[0] != "factures":
         return "payment_dialog.error_not_invoice", {}
 
-    amount = _parse_finite_number(raw_amount)
+    amount = parse_money(raw_amount)
     if amount is None:
         return "payment_dialog.error_invalid_amount", {}
     if amount <= 0:
         return "payment_dialog.error_amount_positive", {}
 
-    total_ttc = max(0.0, _parse_finite_number(row[1]) or 0.0)
-    paid = max(0.0, _parse_finite_number(row[2]) or 0.0)
-    remaining = max(0.0, total_ttc - paid)
+    total_ttc = max(0, as_cents(row[1]))
+    paid = max(0, as_cents(row[2]))
+    remaining = max(0, total_ttc - paid)
     if remaining <= 0:
         return "payment_dialog.error_nothing_due", {}
-    if amount > remaining + 1e-9:
+    if amount > remaining:
         return (
             "payment_dialog.error_amount_exceeds_remaining",
-            {"remaining": remaining},
+            {"remaining": Decimal(remaining) / Decimal(100)},
         )
 
     new_paid = paid + amount
@@ -195,7 +209,7 @@ def _apply_payment(cursor, document_id, raw_amount, method=None):
         "INSERT INTO payments (document_id, date, amount, method, note) VALUES (?, ?, ?, ?, ?)",
         (document_id, date_now, amount, method, "Paiement"),
     )
-    mode = "full" if new_paid >= total_ttc - 1e-9 else "partial"
+    mode = "full" if new_paid >= total_ttc else "partial"
     cursor.execute(
         "UPDATE documents SET paid_amount = ?, payment_mode = ? WHERE id = ?",
         (new_paid, mode, document_id),
@@ -1714,8 +1728,8 @@ class MainApp(ctk.CTkToplevel):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reference TEXT,
                     designation TEXT NOT NULL,
-                    prix_achat REAL NOT NULL DEFAULT 0,
-                    prix_vente REAL NOT NULL DEFAULT 0,
+                    prix_achat INTEGER NOT NULL DEFAULT 0,
+                    prix_vente INTEGER NOT NULL DEFAULT 0,
                     tva REAL NOT NULL DEFAULT 0,
                     stock INTEGER NOT NULL DEFAULT 0
                 )
@@ -1744,10 +1758,10 @@ class MainApp(ctk.CTkToplevel):
                     date TEXT NOT NULL,
                     client_id INTEGER,
                     statut TEXT NOT NULL DEFAULT 'brouillon',
-                    total_ht REAL NOT NULL DEFAULT 0,
-                    total_tva REAL NOT NULL DEFAULT 0,
-                    total_ttc REAL NOT NULL DEFAULT 0,
-                    paid_amount REAL NOT NULL DEFAULT 0,
+                    total_ht INTEGER NOT NULL DEFAULT 0,
+                    total_tva INTEGER NOT NULL DEFAULT 0,
+                    total_ttc INTEGER NOT NULL DEFAULT 0,
+                    paid_amount INTEGER NOT NULL DEFAULT 0,
                     payment_mode TEXT NOT NULL DEFAULT 'none',
                     echeance TEXT,
                     source_bl_id INTEGER,
@@ -1768,11 +1782,11 @@ class MainApp(ctk.CTkToplevel):
                     article_id INTEGER,
                     designation TEXT NOT NULL,
                     quantite REAL NOT NULL DEFAULT 1,
-                    prix_unitaire REAL NOT NULL DEFAULT 0,
+                    prix_unitaire INTEGER NOT NULL DEFAULT 0,
                     tva REAL NOT NULL DEFAULT 0,
-                    total_ht REAL NOT NULL DEFAULT 0,
-                    total_tva REAL NOT NULL DEFAULT 0,
-                    total_ttc REAL NOT NULL DEFAULT 0,
+                    total_ht INTEGER NOT NULL DEFAULT 0,
+                    total_tva INTEGER NOT NULL DEFAULT 0,
+                    total_ttc INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(document_id) REFERENCES documents(id)
                 )
                 """
@@ -1784,7 +1798,7 @@ class MainApp(ctk.CTkToplevel):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     document_id INTEGER NOT NULL,
                     date TEXT NOT NULL,
-                    amount REAL NOT NULL,
+                    amount INTEGER NOT NULL,
                     method TEXT,
                     note TEXT,
                     FOREIGN KEY(document_id) REFERENCES documents(id)
@@ -1794,19 +1808,19 @@ class MainApp(ctk.CTkToplevel):
 
             for ddl in [
                 "ALTER TABLE document_lignes ADD COLUMN article_id INTEGER",
-                "ALTER TABLE articles ADD COLUMN prix_achat REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE articles ADD COLUMN prix_vente REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE articles ADD COLUMN prix_achat INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE articles ADD COLUMN prix_vente INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE articles ADD COLUMN tva REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE documents ADD COLUMN total_ht REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE documents ADD COLUMN total_tva REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE documents ADD COLUMN total_ttc REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE documents ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE documents ADD COLUMN total_ht INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE documents ADD COLUMN total_tva INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE documents ADD COLUMN total_ttc INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE documents ADD COLUMN paid_amount INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE documents ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'none'",
                 "ALTER TABLE documents ADD COLUMN echeance TEXT",
                 "ALTER TABLE document_lignes ADD COLUMN tva REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE document_lignes ADD COLUMN total_ht REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE document_lignes ADD COLUMN total_tva REAL NOT NULL DEFAULT 0",
-                "ALTER TABLE document_lignes ADD COLUMN total_ttc REAL NOT NULL DEFAULT 0",
+                "ALTER TABLE document_lignes ADD COLUMN total_ht INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE document_lignes ADD COLUMN total_tva INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE document_lignes ADD COLUMN total_ttc INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE clients ADD COLUMN matricule_fiscale TEXT",
                 "ALTER TABLE documents ADD COLUMN discount_enabled INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE documents ADD COLUMN discount_value REAL NOT NULL DEFAULT 0",
@@ -1827,6 +1841,10 @@ class MainApp(ctk.CTkToplevel):
                 )
                 """
             )
+
+            # Convert legacy currency-unit amounts once.  Fresh databases
+            # already use INTEGER columns and are left untouched.
+            migrate_money_to_cents(conn)
 
             conn.commit()
         finally:
@@ -2250,8 +2268,8 @@ class MainApp(ctk.CTkToplevel):
                 )
 
             for row in cursor.fetchall():
-                pa = float(row[3] or 0)
-                pv = float(row[4] or 0)
+                pa = as_cents(row[3])
+                pv = as_cents(row[4])
                 tva = float(row[5] or 0)
                 marge = pv - pa
                 self.articles_tree.insert(
@@ -2261,10 +2279,10 @@ class MainApp(ctk.CTkToplevel):
                         row[0],
                         row[1] or "",
                         row[2] or "",
-                        f"{pa:.2f}",
-                        f"{pv:.2f}",
+                        format_money(pa),
+                        format_money(pv),
                         f"{tva:.2f}",
-                        f"{marge:.2f}",
+                        format_money(marge),
                         row[6] if row[6] is not None else 0,
                     ),
                 )
@@ -2724,8 +2742,8 @@ class MainApp(ctk.CTkToplevel):
                 if row:
                     ref_value = row[0] or ""
                     des_value = row[1] or ""
-                    pa_value = str(row[2] if row[2] is not None else 0)
-                    pv_value = str(row[3] if row[3] is not None else 0)
+                    pa_value = money_to_input(as_cents(row[2]))
+                    pv_value = money_to_input(as_cents(row[3]))
                     tva_value = str(row[4] if row[4] is not None else 0)
                     stock_value = str(row[5] if row[5] is not None else 0)
             finally:
@@ -2895,11 +2913,13 @@ class MainApp(ctk.CTkToplevel):
                 return
 
             try:
-                pa_f = float(pa) if pa else 0.0
-                pv_f = float(pv) if pv else 0.0
+                pa_cents = _validate_unit_price(pa) if pa else 0
+                pv_cents = _validate_unit_price(pv) if pv else 0
                 tva_f = float(tva) if tva else 0.0
                 stock_i = int(stock) if stock else 0
             except ValueError:
+                pa_cents = pv_cents = None
+            if pa_cents is None or pv_cents is None:
                 messagebox.showerror(t("common.error"), t("article_dialog.error_price_stock_invalid"))
                 return
 
@@ -2909,7 +2929,7 @@ class MainApp(ctk.CTkToplevel):
                 if article_id is None:
                     cursor.execute(
                         "INSERT INTO articles (reference, designation, prix_achat, prix_vente, tva, stock) VALUES (?, ?, ?, ?, ?, ?)",
-                        (reference or None, designation, pa_f, pv_f, tva_f, stock_i),
+                        (reference or None, designation, pa_cents, pv_cents, tva_f, stock_i),
                     )
                 else:
                     cursor.execute(
@@ -2917,8 +2937,8 @@ class MainApp(ctk.CTkToplevel):
                         (
                             reference or None,
                             designation,
-                            pa_f,
-                            pv_f,
+                            pa_cents,
+                            pv_cents,
                             tva_f,
                             stock_i,
                             article_id,
@@ -3231,9 +3251,9 @@ class MainApp(ctk.CTkToplevel):
                         row[2],
                         row[3],
                         row[4],
-                        f"{(row[5] or 0):.2f}",
-                        f"{(row[6] or 0):.2f}",
-                        f"{(row[7] or 0):.2f}",
+                        format_money(row[5]),
+                        format_money(row[6]),
+                        format_money(row[7]),
                     ),
                 )
         finally:
@@ -3442,9 +3462,9 @@ class MainApp(ctk.CTkToplevel):
                         row[2],
                         row[3],
                         row[4],
-                        f"{(row[5] or 0):.2f}",
-                        f"{(row[6] or 0):.2f}",
-                        f"{(row[7] or 0):.2f}",
+                        format_money(row[5]),
+                        format_money(row[6]),
+                        format_money(row[7]),
                     ),
                 )
         finally:
@@ -3524,41 +3544,40 @@ class MainApp(ctk.CTkToplevel):
         def recalc_total():
             if discount_enabled_var is None or discount_entry is None:
                 return
-            ht = 0.0
-            tva_sum = 0.0
+            ht = 0
+            tva_sum = 0
             for item in lines_tree.get_children():
                 _article_id, _ref, art, qty, pu, tva = lines_tree.item(item, "values")
                 values, error_key = _validate_line_inputs(qty, pu, tva)
                 if error_key:
                     continue
-                qty_f, pu_f, tva_f = values
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
+                qty_f, pu_cents, tva_f = values
+                line_ht, line_tva, _line_ttc = line_totals(
+                    qty_f, pu_cents, tva_f
+                )
                 ht += line_ht
                 tva_sum += line_tva
 
             discount_percent = 0.0
-            discount_amount = 0.0
+            discount_amount = 0
             if discount_enabled_var.get():
                 discount_percent = (
                     _validate_percentage(discount_entry.get().strip() or 0) or 0.0
                 )
-                discount_amount = ht * (discount_percent / 100.0)
+                discount_amount = discount_cents(ht, discount_percent)
 
-            ttc = ht + tva_sum - discount_amount
-            if ttc < 0:
-                ttc = 0.0
+            ttc = max(0, ht + tva_sum - discount_amount)
 
             if lbl_ht_val:
-                lbl_ht_val.configure(text=f"{ht:.2f}")
+                lbl_ht_val.configure(text=format_money(ht))
             if lbl_tva_val:
-                lbl_tva_val.configure(text=f"{tva_sum:.2f}")
+                lbl_tva_val.configure(text=format_money(tva_sum))
             if lbl_discount_val:
                 lbl_discount_val.configure(text=f"{discount_percent:.1f}%")
             if lbl_discount_amount:
-                lbl_discount_amount.configure(text=f"-{discount_amount:.2f}")
+                lbl_discount_amount.configure(text=f"-{format_money(discount_amount)}")
             if lbl_ttc_val:
-                lbl_ttc_val.configure(text=f"{ttc:.2f}")
+                lbl_ttc_val.configure(text=format_money(ttc))
 
         def add_line():
             dlg = ctk.CTkToplevel(dialog)
@@ -3591,7 +3610,7 @@ class MainApp(ctk.CTkToplevel):
 
             names = [a[1] for a in articles]
             id_map = {a[1]: int(a[0]) for a in articles}
-            price_map = {a[1]: float(a[2] or 0) for a in articles}
+            price_map = {a[1]: as_cents(a[2]) for a in articles}
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
             ctk.CTkLabel(form, text=t("new_doc.col_article"), font=self.ui["font_body"]).grid(
@@ -3722,7 +3741,7 @@ class MainApp(ctk.CTkToplevel):
 
                 # Auto-fill price and tva
                 if prix_vente is not None:
-                    pu_var.set(str(prix_vente))
+                    pu_var.set(money_to_input(prix_vente))
                 if tva is not None:
                     tva_var.set(str(tva))
 
@@ -3796,21 +3815,19 @@ class MainApp(ctk.CTkToplevel):
             def update_preview(event=None):
                 try:
                     qty_f = _parse_finite_number(qty_entry.get().strip() or 0)
-                    pu_f = _parse_finite_number(pu_entry.get().strip() or 0)
+                    pu_cents = parse_money(pu_entry.get().strip() or 0)
                     tva_f = _parse_finite_number(tva_entry.get().strip() or 0)
-                    if qty_f is None or pu_f is None or tva_f is None:
+                    if qty_f is None or pu_cents is None or tva_f is None:
                         raise ValueError("non-finite number")
                 except Exception:
                     prev_ht_label.configure(text="HT: -")
                     prev_tva_label.configure(text="TVA: -")
                     prev_ttc_label.configure(text="TTC: -")
                     return
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
-                line_ttc = line_ht + line_tva
-                prev_ht_label.configure(text=f"HT: {line_ht:.2f}")
-                prev_tva_label.configure(text=f"TVA: {line_tva:.2f}")
-                prev_ttc_label.configure(text=f"TTC: {line_ttc:.2f}")
+                line_ht, line_tva, line_ttc = line_totals(qty_f, pu_cents, tva_f)
+                prev_ht_label.configure(text=f"HT: {format_money(line_ht)}")
+                prev_tva_label.configure(text=f"TVA: {format_money(line_tva)}")
+                prev_ttc_label.configure(text=f"TTC: {format_money(line_ttc)}")
 
             qty_var.trace_add("write", lambda *_: update_preview())
             pu_var.trace_add("write", lambda *_: update_preview())
@@ -3855,7 +3872,16 @@ class MainApp(ctk.CTkToplevel):
                     return
 
                 lines_tree.insert(
-                    "", "end", values=(article_id, reference, designation, qty, pu, tva)
+                    "",
+                    "end",
+                    values=(
+                        article_id,
+                        reference,
+                        designation,
+                        qty,
+                        format_money(pu),
+                        tva,
+                    ),
                 )
                 recalc_total()
                 dlg.destroy()
@@ -3911,7 +3937,7 @@ class MainApp(ctk.CTkToplevel):
 
             names = [a[1] for a in articles]
             id_map = {a[1]: int(a[0]) for a in articles}
-            price_map = {a[1]: float(a[2] or 0) for a in articles}
+            price_map = {a[1]: as_cents(a[2]) for a in articles}
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
             ctk.CTkLabel(form, text=t("new_doc.col_article"), font=self.ui["font_body"]).grid(
@@ -4043,7 +4069,7 @@ class MainApp(ctk.CTkToplevel):
                 # Auto-fill price and tva
                 if prix_vente is not None:
                     pu_entry.delete(0, "end")
-                    pu_entry.insert(0, str(prix_vente))
+                    pu_entry.insert(0, money_to_input(prix_vente))
                 if tva is not None:
                     tva_entry.delete(0, "end")
                     tva_entry.insert(0, str(tva))
@@ -4158,7 +4184,17 @@ class MainApp(ctk.CTkToplevel):
                     return
                 qty, pu, tva = values
 
-                lines_tree.item(item, values=(article_id, reference, designation, qty, pu, tva))
+                lines_tree.item(
+                    item,
+                    values=(
+                        article_id,
+                        reference,
+                        designation,
+                        qty,
+                        format_money(pu),
+                        tva,
+                    ),
+                )
                 recalc_total()
                 dlg.destroy()
 
@@ -4351,8 +4387,8 @@ class MainApp(ctk.CTkToplevel):
             # Validate every line before touching the database so a bad row
             # cannot leave a half-saved document behind.
             validated_lines = []
-            ht = 0.0
-            tva_sum = 0.0
+            ht = 0
+            tva_sum = 0
             for item in items:
                 article_id, _ref, art, qty, pu, tva = lines_tree.item(
                     item, "values"
@@ -4361,13 +4397,22 @@ class MainApp(ctk.CTkToplevel):
                 if error_key:
                     messagebox.showerror(t("common.error"), t(error_key))
                     return
-                qty_f, pu_f, tva_f = values
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
+                qty_f, pu_cents, tva_f = values
+                line_ht, line_tva, _line_ttc = line_totals(
+                    qty_f, pu_cents, tva_f
+                )
                 ht += line_ht
                 tva_sum += line_tva
                 validated_lines.append(
-                    (article_id, art, qty_f, pu_f, tva_f, line_ht, line_tva)
+                    (
+                        article_id,
+                        art,
+                        qty_f,
+                        pu_cents,
+                        tva_f,
+                        line_ht,
+                        line_tva,
+                    )
                 )
 
             discount_percent, error_key = _validate_discount_input(
@@ -4377,10 +4422,8 @@ class MainApp(ctk.CTkToplevel):
                 messagebox.showerror(t("common.error"), t(error_key))
                 return
 
-            discount_amount = ht * (discount_percent / 100.0)
-            total_ttc = ht + tva_sum - discount_amount
-            if total_ttc < 0:
-                total_ttc = 0.0
+            discount_amount = discount_cents(ht, discount_percent)
+            total_ttc = max(0, ht + tva_sum - discount_amount)
 
             doc_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -4404,7 +4447,7 @@ class MainApp(ctk.CTkToplevel):
                         ht,
                         tva_sum,
                         total_ttc,
-                        0.0,
+                        0,
                         "none",
                         1 if discount_enabled_var.get() else 0,
                         discount_percent,
@@ -4416,7 +4459,7 @@ class MainApp(ctk.CTkToplevel):
                     article_id,
                     art,
                     qty_f,
-                    pu_f,
+                    pu_cents,
                     tva_f,
                     line_ht,
                     line_tva,
@@ -4432,7 +4475,7 @@ class MainApp(ctk.CTkToplevel):
                             int(article_id) if article_id not in (None, "") else None,
                             art,
                             qty_f,
-                            pu_f,
+                            pu_cents,
                             tva_f,
                             line_ht,
                             line_tva,
@@ -4657,7 +4700,7 @@ class MainApp(ctk.CTkToplevel):
                     ref or "",
                     des or "",
                     float(qty or 0),
-                    float(pu or 0),
+                    format_money(pu),
                     float(tva or 0),
                 ),
             )
@@ -4665,9 +4708,9 @@ class MainApp(ctk.CTkToplevel):
 
         totals_bar = ctk.CTkFrame(dialog, fg_color="transparent")
         totals_bar.pack(fill="x", padx=20, pady=(0, 10))
-        total_ht_value = f"{float(total_ht or 0):.2f}"
-        total_tva_value = f"{float(total_tva or 0):.2f}"
-        total_ttc_value = f"{float(total_ttc or 0):.2f}"
+        total_ht_value = format_money(total_ht)
+        total_tva_value = format_money(total_tva)
+        total_ttc_value = format_money(total_ttc)
 
         # Payment section (left side) - only invoices can receive payments.
         pay_entry = None
@@ -4759,10 +4802,10 @@ class MainApp(ctk.CTkToplevel):
             font=self.ui["font_body"],
             text_color=("gray35", "gray70"),
         ).pack(side="left")
-        discount_amount_value = total_ht * (discount_value / 100.0) if discount_value else 0
+        discount_amount_value = discount_cents(total_ht, discount_value)
         discount_amount_label = ctk.CTkLabel(
             discount_amount_frame,
-            text=f"-{discount_amount_value:.2f}",
+            text=f"-{format_money(discount_amount_value)}",
             font=self.ui["font_h2"]
         )
         discount_amount_label.pack(side="right")
@@ -4811,8 +4854,8 @@ class MainApp(ctk.CTkToplevel):
         ht_value_label.pack(anchor="e")
 
         def recalc_totals_once():
-            ht = 0.0
-            tva_sum = 0.0
+            ht = 0
+            tva_sum = 0
             for item in lines_tree.get_children():
                 _article_id, _ref, _des, qty, pu, tva = lines_tree.item(
                     item, "values"
@@ -4820,30 +4863,31 @@ class MainApp(ctk.CTkToplevel):
                 values, error_key = _validate_line_inputs(qty, pu, tva)
                 if error_key:
                     continue
-                qty_f, pu_f, tva_f = values
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
+                qty_f, pu_cents, tva_f = values
+                line_ht, line_tva, _line_ttc = line_totals(
+                    qty_f, pu_cents, tva_f
+                )
                 ht += line_ht
                 tva_sum += line_tva
             
             discount_percent = 0.0
-            discount_amount = 0.0
+            discount_amount = 0
             if discount_enabled_var.get():
                 discount_percent = (
                     _validate_percentage(discount_entry.get().strip() or 0) or 0.0
                 )
-                discount_amount = ht * (discount_percent / 100.0)
+                discount_amount = discount_cents(ht, discount_percent)
             
-            ttc = ht + tva_sum - discount_amount
-            if ttc < 0:
-                ttc = 0.0
+            ttc = max(0, ht + tva_sum - discount_amount)
             
-            ht_value_label.configure(text=f"{ht:.2f}")
-            tva_value_label.configure(text=f"{tva_sum:.2f}")
-            ttc_value_label.configure(text=f"{ttc:.2f}")
+            ht_value_label.configure(text=format_money(ht))
+            tva_value_label.configure(text=format_money(tva_sum))
+            ttc_value_label.configure(text=format_money(ttc))
             
             discount_value_label.configure(text=f"{discount_percent:.1f}%")
-            discount_amount_label.configure(text=f"-{discount_amount:.2f}")
+            discount_amount_label.configure(
+                text=f"-{format_money(discount_amount)}"
+            )
 
         def _get_selected_line_item():
             sel = lines_tree.selection()
@@ -4908,9 +4952,9 @@ class MainApp(ctk.CTkToplevel):
                 if not row:
                     messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                     return
-                total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
-                paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
-                delta = max(0.0, total_ttc - paid)
+                total_ttc = max(0, as_cents(row[0]))
+                paid = max(0, as_cents(row[1]))
+                delta = max(0, total_ttc - paid)
                 date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 if delta > 0:
                     cursor.execute(
@@ -4990,7 +5034,7 @@ class MainApp(ctk.CTkToplevel):
 
             names = [a[1] for a in articles]
             id_map = {a[1]: int(a[0]) for a in articles}
-            price_map = {a[1]: float(a[2] or 0) for a in articles}
+            price_map = {a[1]: as_cents(a[2]) for a in articles}
             tva_map = {a[1]: float(a[3] or 0) for a in articles}
 
             ctk.CTkLabel(
@@ -5121,7 +5165,7 @@ class MainApp(ctk.CTkToplevel):
 
                 # Auto-fill price and tva
                 if prix_vente is not None:
-                    pu_var.set(str(prix_vente))
+                    pu_var.set(money_to_input(prix_vente))
                 if tva is not None:
                     tva_var.set(str(tva))
 
@@ -5202,21 +5246,19 @@ class MainApp(ctk.CTkToplevel):
             def update_preview(event=None):
                 try:
                     qty_f = _parse_finite_number(qty_entry.get().strip() or 0)
-                    pu_f = _parse_finite_number(pu_entry.get().strip() or 0)
+                    pu_cents = parse_money(pu_entry.get().strip() or 0)
                     tva_f = _parse_finite_number(tva_entry.get().strip() or 0)
-                    if qty_f is None or pu_f is None or tva_f is None:
+                    if qty_f is None or pu_cents is None or tva_f is None:
                         raise ValueError("non-finite number")
                 except Exception:
                     prev_ht_label.configure(text="HT: -")
                     prev_tva_label.configure(text="TVA: -")
                     prev_ttc_label.configure(text="TTC: -")
                     return
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
-                line_ttc = line_ht + line_tva
-                prev_ht_label.configure(text=f"HT: {line_ht:.2f}")
-                prev_tva_label.configure(text=f"TVA: {line_tva:.2f}")
-                prev_ttc_label.configure(text=f"TTC: {line_ttc:.2f}")
+                line_ht, line_tva, line_ttc = line_totals(qty_f, pu_cents, tva_f)
+                prev_ht_label.configure(text=f"HT: {format_money(line_ht)}")
+                prev_tva_label.configure(text=f"TVA: {format_money(line_tva)}")
+                prev_ttc_label.configure(text=f"TTC: {format_money(line_ttc)}")
 
             qty_var.trace_add("write", lambda *_: update_preview())
             pu_var.trace_add("write", lambda *_: update_preview())
@@ -5237,7 +5279,7 @@ class MainApp(ctk.CTkToplevel):
                 if error_key:
                     messagebox.showerror(t("common.error"), t(error_key))
                     return
-                qty_f, pu_f, tva_f = values
+                qty_f, pu_cents, tva_f = values
 
                 # Get article info from search entry (format: "ID - REF - Designation")
                 display_value = article_search_entry.get().strip()
@@ -5252,15 +5294,18 @@ class MainApp(ctk.CTkToplevel):
                             article_id_val = int(id_part)
                         reference_val = ref_part
 
+                row_values = (
+                    article_id_val,
+                    reference_val,
+                    des,
+                    qty_f,
+                    format_money(pu_cents),
+                    tva_f,
+                )
                 if item_id is None:
-                    lines_tree.insert(
-                        "", "end", values=(article_id_val, reference_val, des, qty_f, pu_f, tva_f)
-                    )
+                    lines_tree.insert("", "end", values=row_values)
                 else:
-                    lines_tree.item(
-                        item_id,
-                        values=(article_id_val, reference_val, des, qty_f, pu_f, tva_f),
-                    )
+                    lines_tree.item(item_id, values=row_values)
 
                 self._apply_zebra(lines_tree)
                 recalc_totals_once()
@@ -5337,8 +5382,8 @@ class MainApp(ctk.CTkToplevel):
             # Validate every line before touching the database so a bad row
             # cannot leave the document with partially replaced lines.
             validated_lines = []
-            ht = 0.0
-            tva_sum = 0.0
+            ht = 0
+            tva_sum = 0
             for item in items:
                 article_id_val, _ref, des, qty, pu, tva = lines_tree.item(
                     item, "values"
@@ -5352,13 +5397,22 @@ class MainApp(ctk.CTkToplevel):
                 if error_key:
                     messagebox.showerror(t("common.error"), t(error_key))
                     return
-                qty_f, pu_f, tva_f = values
-                line_ht = qty_f * pu_f
-                line_tva = line_ht * (tva_f / 100.0)
+                qty_f, pu_cents, tva_f = values
+                line_ht, line_tva, _line_ttc = line_totals(
+                    qty_f, pu_cents, tva_f
+                )
                 ht += line_ht
                 tva_sum += line_tva
                 validated_lines.append(
-                    (article_id_val, des, qty_f, pu_f, tva_f, line_ht, line_tva)
+                    (
+                        article_id_val,
+                        des,
+                        qty_f,
+                        pu_cents,
+                        tva_f,
+                        line_ht,
+                        line_tva,
+                    )
                 )
 
             discount_percent, error_key = _validate_discount_input(
@@ -5368,10 +5422,8 @@ class MainApp(ctk.CTkToplevel):
                 messagebox.showerror(t("common.error"), t(error_key))
                 return
 
-            discount_amount = ht * (discount_percent / 100.0)
-            total_ttc = ht + tva_sum - discount_amount
-            if total_ttc < 0:
-                total_ttc = 0.0
+            discount_amount = discount_cents(ht, discount_percent)
+            total_ttc = max(0, ht + tva_sum - discount_amount)
 
             conn3 = sqlite3.connect(self.db_path)
             cur3 = conn3.cursor()
@@ -5431,7 +5483,7 @@ class MainApp(ctk.CTkToplevel):
                     article_id_val,
                     des,
                     qty_f,
-                    pu_f,
+                    pu_cents,
                     tva_f,
                     line_ht,
                     line_tva,
@@ -5455,7 +5507,7 @@ class MainApp(ctk.CTkToplevel):
                             art_id,
                             des,
                             qty_f,
-                            pu_f,
+                            pu_cents,
                             tva_f,
                             line_ht,
                             line_tva,
@@ -5636,7 +5688,7 @@ class MainApp(ctk.CTkToplevel):
                     doc[6],
                     doc[7],
                     doc[8],
-                    doc[9] or 0.0,
+                    as_cents(doc[9]),
                     doc[10] or "none",
                     doc[11],
                     doc[12] or 0,
@@ -6116,14 +6168,14 @@ class MainApp(ctk.CTkToplevel):
             for row in cursor.fetchall():
                 client_id = row[0]
                 name = row[1] or ""
-                unpaid = float(row[2] or 0)
+                unpaid = as_cents(row[2])
                 
                 # Determine display text and tag based on unpaid amount
                 if unpaid <= 0:
                     unpaid_text = t("common.paid")
                     tag = "paid"
                 else:
-                    unpaid_text = f"{unpaid:.2f}"
+                    unpaid_text = format_money(unpaid)
                     tag = "unpaid"
                 
                 self.clients_unpaid_tree.insert(
@@ -6176,16 +6228,16 @@ class MainApp(ctk.CTkToplevel):
                 (client_id,),
             )
             for r in cur.fetchall():
-                total_ttc = float(r[3] or 0)
-                paid = float(r[4] or 0)
-                reste = max(0.0, total_ttc - paid)
+                total_ttc = as_cents(r[3])
+                paid = as_cents(r[4])
+                reste = max(0, total_ttc - paid)
                 
                 # Determine tag based on remainder
                 if reste <= 0:
                     reste_text = t("common.paid")
                     tag = "paid"
                 else:
-                    reste_text = f"{reste:.2f}"
+                    reste_text = format_money(reste)
                     tag = "unpaid"
                 
                 self.client_docs_tree.insert(
@@ -6195,8 +6247,8 @@ class MainApp(ctk.CTkToplevel):
                         r[0],
                         r[1],
                         r[2],
-                        f"{total_ttc:.2f}",
-                        f"{paid:.2f}",
+                        format_money(total_ttc),
+                        format_money(paid),
                         reste_text,
                     ),
                     tags=(tag,),
@@ -6292,14 +6344,14 @@ class MainApp(ctk.CTkToplevel):
             for row in cur.fetchall():
                 client_id = row[0]
                 name = row[1] or ""
-                unpaid = float(row[2] or 0)
+                unpaid = as_cents(row[2])
                 
                 # Determine display text and tag based on unpaid amount
                 if unpaid <= 0:
                     unpaid_text = t("common.paid")
                     tag = "paid"
                 else:
-                    unpaid_text = f"{unpaid:.2f}"
+                    unpaid_text = format_money(unpaid)
                     tag = "unpaid"
                 
                 self.clients_unpaid_tree.insert(
@@ -6422,16 +6474,16 @@ class MainApp(ctk.CTkToplevel):
             self.client_docs_tree.tag_configure("unpaid", foreground="#ef4444")  # Red
             
             for r in cur.fetchall():
-                total_ttc = float(r[3] or 0)
-                paid = float(r[4] or 0)
-                reste = max(0.0, total_ttc - paid)
+                total_ttc = as_cents(r[3])
+                paid = as_cents(r[4])
+                reste = max(0, total_ttc - paid)
                 
                 # Determine tag based on remainder
                 if reste <= 0:
                     reste_text = t("common.paid")
                     tag = "paid"
                 else:
-                    reste_text = f"{reste:.2f}"
+                    reste_text = format_money(reste)
                     tag = "unpaid"
                 
                 self.client_docs_tree.insert(
@@ -6441,8 +6493,8 @@ class MainApp(ctk.CTkToplevel):
                         r[0],
                         r[1],
                         r[2],
-                        f"{total_ttc:.2f}",
-                        f"{paid:.2f}",
+                        format_money(total_ttc),
+                        format_money(paid),
                         reste_text,
                     ),
                     tags=(tag,),
@@ -6525,9 +6577,9 @@ class MainApp(ctk.CTkToplevel):
             if not row:
                 messagebox.showerror(t("common.error"), t("payment_dialog.error_doc_not_found"))
                 return
-            total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
-            paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
-            delta = max(0.0, total_ttc - paid)
+            total_ttc = max(0, as_cents(row[0]))
+            paid = max(0, as_cents(row[1]))
+            delta = max(0, total_ttc - paid)
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if delta > 0:
                 cursor.execute(
@@ -6611,9 +6663,9 @@ class MainApp(ctk.CTkToplevel):
             row = cursor.fetchone()
             if not row:
                 return
-            total_ttc = max(0.0, _parse_finite_number(row[0]) or 0.0)
-            paid = max(0.0, _parse_finite_number(row[1]) or 0.0)
-            delta = max(0.0, total_ttc - paid)
+            total_ttc = max(0, as_cents(row[0]))
+            paid = max(0, as_cents(row[1]))
+            delta = max(0, total_ttc - paid)
 
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if delta > 0:
@@ -6982,14 +7034,14 @@ class MainApp(ctk.CTkToplevel):
         
         if show_ref:
             rows_html = "".join(
-                f"<tr><td>{ref if ref else ''}</td><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{pu:.2f}</td><td style='text-align:right'>{tva:.1f}%</td><td style='text-align:right'>{ht:.2f}</td><td style='text-align:right'>{ttc:.2f}</td></tr>"
+                f"<tr><td>{ref if ref else ''}</td><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{format_money(pu)}</td><td style='text-align:right'>{float(tva or 0):.1f}%</td><td style='text-align:right'>{format_money(ht)}</td><td style='text-align:right'>{format_money(ttc)}</td></tr>"
                 for (article_id, ref, d, q, pu, tva, ht, tv, ttc) in lines
             )
             colspan = "7"
             ref_col = "<th>Référence</th>"
         else:
             rows_html = "".join(
-                f"<tr><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{pu:.2f}</td><td style='text-align:right'>{tva:.1f}%</td><td style='text-align:right'>{ht:.2f}</td><td style='text-align:right'>{ttc:.2f}</td></tr>"
+                f"<tr><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{format_money(pu)}</td><td style='text-align:right'>{float(tva or 0):.1f}%</td><td style='text-align:right'>{format_money(ht)}</td><td style='text-align:right'>{format_money(ttc)}</td></tr>"
                 for (article_id, ref, d, q, pu, tva, ht, tv, ttc) in lines
             )
             colspan = "6"
@@ -7051,12 +7103,12 @@ class MainApp(ctk.CTkToplevel):
 
   <div style='display: flex; justify-content: space-between; margin-top: 16px; gap: 40px;'>
     <div style='flex: 1;'>
-      {f"<div class='total'>Remise: {float(discount_value):.1f}% = -{float(total_ht * discount_value / 100):.2f}</div>" if discount_enabled and float(discount_value or 0) > 0 else ""}
+      {f"<div class='total'>Remise: {float(discount_value):.1f}% = -{format_money(discount_cents(total_ht, discount_value))}</div>" if discount_enabled and float(discount_value or 0) > 0 else ""}
     </div>
     <div style='flex: 1; text-align: right;'>
-      <div class='total'>HT: {float(total_ht or 0):.2f}</div>
-      <div class='total'>TVA: {float(total_tva or 0):.2f}</div>
-      <div class='total'>TTC: {float(total_ttc or 0):.2f}</div>
+      <div class='total'>HT: {format_money(total_ht)}</div>
+      <div class='total'>TVA: {format_money(total_tva)}</div>
+      <div class='total'>TTC: {format_money(total_ttc)}</div>
     </div>
   </div>
 
@@ -7278,10 +7330,10 @@ class MainApp(ctk.CTkToplevel):
                         Paragraph(ref_txt, normal),
                         Paragraph(des_txt.replace("\n", "<br/>") or "-", normal),
                         Paragraph(f"{float(qty or 0):.2f}", normal),
-                        Paragraph(f"{float(pu or 0):.2f}", normal),
+                        Paragraph(format_money(pu), normal),
                         Paragraph(f"{float(tva or 0):.1f}%", normal),
-                        Paragraph(f"{float(tht or 0):.2f}", normal),
-                        Paragraph(f"{float(tttc or 0):.2f}", normal),
+                        Paragraph(format_money(tht), normal),
+                        Paragraph(format_money(tttc), normal),
                     ]
                 )
             else:
@@ -7289,10 +7341,10 @@ class MainApp(ctk.CTkToplevel):
                     [
                         Paragraph(des_txt.replace("\n", "<br/>") or "-", normal),
                         Paragraph(f"{float(qty or 0):.2f}", normal),
-                        Paragraph(f"{float(pu or 0):.2f}", normal),
+                        Paragraph(format_money(pu), normal),
                         Paragraph(f"{float(tva or 0):.1f}%", normal),
-                        Paragraph(f"{float(tht or 0):.2f}", normal),
-                        Paragraph(f"{float(tttc or 0):.2f}", normal),
+                        Paragraph(format_money(tht), normal),
+                        Paragraph(format_money(tttc), normal),
                     ]
                 )
 
@@ -7336,15 +7388,15 @@ class MainApp(ctk.CTkToplevel):
         totals_rows = [
             [
                 Paragraph("Total HT", bold),
-                Paragraph(f"{float(total_ht or 0):.2f}", bold),
+                Paragraph(format_money(total_ht), bold),
             ],
             [
                 Paragraph("Total TVA", bold),
-                Paragraph(f"{float(total_tva or 0):.2f}", bold),
+                Paragraph(format_money(total_tva), bold),
             ],
             [
                 Paragraph(t("client_dialog.col_ttc"), bold),
-                Paragraph(f"{float(total_ttc or 0):.2f}", bold),
+                Paragraph(format_money(total_ttc), bold),
             ],
         ]
 
@@ -7367,7 +7419,7 @@ class MainApp(ctk.CTkToplevel):
 
         # Create discount table (left side) if discount is enabled and has a value
         if discount_enabled and float(discount_value or 0) > 0:
-            discount_amount = total_ht * (discount_value / 100.0)
+            discount_amount = discount_cents(total_ht, discount_value)
             discount_rows = [
                 [
                     Paragraph(t("new_doc.discount_label"), bold),
@@ -7375,7 +7427,7 @@ class MainApp(ctk.CTkToplevel):
                 ],
                 [
                     Paragraph(t("new_doc.discount_amount_label"), bold),
-                    Paragraph(f"-{float(discount_amount):.2f}", bold),
+                    Paragraph(f"-{format_money(discount_amount)}", bold),
                 ],
             ]
             discount_table = Table(discount_rows, colWidths=[35 * mm, 35 * mm])
@@ -7462,7 +7514,7 @@ class MainApp(ctk.CTkToplevel):
         card2 = create_card(
             cards_frame,
             "Ventes du jour",
-            f"{today_sales[0]}\n{today_sales[1]:.2f} €",
+            f"{today_sales[0]}\n{format_money(today_sales[1])} €",
             "💰",
         )
         card2.pack(side="left", fill="both", expand=True, padx=10)
@@ -7470,7 +7522,7 @@ class MainApp(ctk.CTkToplevel):
         card3 = create_card(
             cards_frame,
             "Ventes du mois",
-            f"{month_sales[0]}\n{month_sales[1]:.2f} €",
+            f"{month_sales[0]}\n{format_money(month_sales[1])} €",
             "📊",
         )
         card3.pack(side="left", fill="both", expand=True, padx=10)
@@ -7544,7 +7596,7 @@ class MainApp(ctk.CTkToplevel):
                     row[0],
                     row[1],
                     row[2],
-                    f"{row[3]:.2f} €",
+                    f"{format_money(row[3])} €",
                     formatted_date,
                 ),
             )
@@ -7706,7 +7758,11 @@ class MainApp(ctk.CTkToplevel):
             product_id = product[0]
             name = product[1]
             description = product[2] if product[2] else ""
-            price = f"{product[3]:.2f} €" if product[3] is not None else "0.00 €"
+            price = (
+                f"{format_money(product[3])} €"
+                if product[3] is not None
+                else "0.00 €"
+            )
             stock = product[4]
 
             self.products_tree.insert(
@@ -7746,8 +7802,10 @@ class MainApp(ctk.CTkToplevel):
                 return
 
             try:
-                price = float(price)
+                price = _validate_unit_price(price)
                 stock = int(stock)
+                if price is None:
+                    raise ValueError("invalid price")
 
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
@@ -8017,7 +8075,7 @@ class MainApp(ctk.CTkToplevel):
                 1,
                 "2025-01-01 10:30:00",
                 "Client 1",
-                150.50,
+                format_money(15050),
                 "Terminée",
                 "Voir | Supprimer",
             ),
@@ -8025,7 +8083,7 @@ class MainApp(ctk.CTkToplevel):
                 2,
                 "2025-01-02 14:45:00",
                 "Client 2",
-                230.75,
+                format_money(23075),
                 "En attente",
                 "Voir | Supprimer",
             ),
@@ -8140,7 +8198,7 @@ class MainApp(ctk.CTkToplevel):
             price_stock_inner_frame, text="Prix*", font=self.ui["font_body"]
         ).grid(row=0, column=0, sticky="w")
         price_entry = ctk.CTkEntry(price_stock_inner_frame)
-        price_entry.insert(0, str(product[3] if product[3] is not None else "0.00"))
+        price_entry.insert(0, money_to_input(product[3]))
         price_entry.grid(row=1, column=0, sticky="we", padx=(0, 10), pady=(0, 10))
 
         ctk.CTkLabel(
@@ -8163,8 +8221,10 @@ class MainApp(ctk.CTkToplevel):
                 return
 
             try:
-                price = float(price)
+                price = _validate_unit_price(price)
                 stock = int(stock)
+                if price is None:
+                    raise ValueError("invalid price")
 
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
@@ -8707,7 +8767,7 @@ class MainApp(ctk.CTkToplevel):
         history_tree.configure(yscrollcommand=scrollbar.set)
         history_tree.pack(fill="both", expand=True)
 
-        total_spent = 0.0
+        total_spent = 0
         if client_id:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -8726,10 +8786,12 @@ class MainApp(ctk.CTkToplevel):
                     dt = d[0]
                     typ = d[1]
                     num = d[2]
-                    ttc = d[3] if d[3] else 0.0
+                    ttc = as_cents(d[3])
                     st = d[4]
                     history_tree.insert(
-                        "", "end", values=(dt, typ, num, f"{ttc:.2f}", st)
+                        "",
+                        "end",
+                        values=(dt, typ, num, format_money(ttc), st),
                     )
                     if typ in ("factures", "reception"):
                         total_spent += ttc
@@ -8753,7 +8815,7 @@ class MainApp(ctk.CTkToplevel):
             text_color=("gray35", "gray70"),
         ).pack(anchor="e")
         spent_label = ctk.CTkLabel(
-            spent_box, text=f"{total_spent:.2f}", font=self.ui["font_h2"]
+            spent_box, text=format_money(total_spent), font=self.ui["font_h2"]
         )
         spent_label.pack(anchor="e")
 

@@ -289,7 +289,7 @@ class LoginWindow(ctk.CTk):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             description TEXT,
-            price REAL NOT NULL,
+            price INTEGER NOT NULL,
             stock INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -300,7 +300,7 @@ class LoginWindow(ctk.CTk):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             product_id INTEGER,
             quantity INTEGER NOT NULL,
-            total_price REAL NOT NULL,
+            total_price INTEGER NOT NULL,
             sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             user_id INTEGER,
             FOREIGN KEY (product_id) REFERENCES products (id),

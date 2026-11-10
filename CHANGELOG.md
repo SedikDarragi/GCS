@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Centralised, testable account model (`accounts.py`)
+- Shared money helpers (`money.py`) for parsing, half-up rounding, formatting and migration
+- Integer-cent storage for all monetary columns, with `decimal.Decimal` used for fractional calculations and display
+- One-time, idempotent migration of existing `REAL` currency values to integer cents (`PRAGMA user_version = 1`)
 - Password change flow, password reset, and active/administrator user management in the admin panel
 - Failed-login lockout (5 attempts / 15 minutes) and disabled-account support
 - Case-insensitive username/email uniqueness and stronger password policy (8+ characters)
@@ -20,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Client list now shows all clients (including fully paid ones)
+- Document totals, line totals, discounts, payments, client balances and exports now calculate in integer cents and round half-up to the nearest cent
+- Legacy `products.price` and `sales.total_price` values are migrated to integer cents as well
 - Improved sorting logic to handle "Payé" text
 - Enhanced zebra striping with payment status colors
 - Backups now use SQLite's backup API for a consistent snapshot (including WAL data)

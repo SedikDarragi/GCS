@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from accounts import ensure_account_schema
+from money import migrate_money_to_cents
 
 REQUIRED_TABLES = ("users",)
 REQUIRED_USER_COLUMNS = (
@@ -264,6 +265,7 @@ def restore_database(db_path, source_path, create_backup=True):
         conn = sqlite3.connect(db_path)
         try:
             ensure_account_schema(conn)
+            migrate_money_to_cents(conn)
         finally:
             conn.close()
         validate_database_file(db_path)

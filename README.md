@@ -99,6 +99,7 @@ No cloud, no subscription — your data stays in a local `commercial.db` SQLite 
 |---|---|
 | **UI** | [customtkinter](https://github.com/TomSchimansky/CustomTkinter) `>=5.2.0`, `ttk.Treeview`, `Pillow` for images |
 | **Data** | `SQLite` (stdlib `sqlite3`), single file `commercial.db` |
+| **Money** | Integer cents for storage, `decimal.Decimal` for rounding / formatting |
 | **Export** | `reportlab` `>=4.0.0` for PDF, HTML export |
 | **Security** | `hashlib.pbkdf2_hmac` + `secrets` |
 | **Tests** | `pytest` (headless, no GUI required) |
@@ -113,6 +114,7 @@ No cloud, no subscription — your data stays in a local `commercial.db` SQLite 
 GCS/
 ├── main.py              # Login / registration UI and DB bootstrap
 ├── accounts.py          # Account model, password hashing, auth, lockout, admin guards
+├── money.py             # Integer-cent money parsing, rounding, formatting and migration
 ├── database_maintenance.py # Safe database validation, backup, atomic restore and rollback
 ├── main_app.py          # Main application — UI, business logic, exports (~8100 lines)
 ├── requirements.txt     # Runtime dependencies
@@ -124,6 +126,7 @@ GCS/
 │   ├── test_accounts.py # account model, lockout, roles, password policy
 │   ├── test_database_maintenance.py # safe backup / restore validation and atomic swap
 │   ├── test_database.py # schema, idempotency, sequences
+│   ├── test_money.py    # cents parsing / rounding, line totals, one-time migration
 │   └── test_db_path.py  # DB path resolution
 ├── commercial.db        # Created on first run (gitignored)
 ├── README.md            # This file
@@ -250,15 +253,17 @@ SQLite file: `commercial.db` — always resolved to `os.path.dirname(__file__)` 
 | Table | Purpose |
 |---|---|
 | `users` | `username`, `password` (hashed), `email`, `full_name`, `is_admin`, `is_active`, `must_change_password`, failed-login/lockout metadata |
-| `articles` | `reference`, `designation`, `prix_achat`, `prix_vente`, `tva`, `stock` |
+| `articles` | `reference`, `designation`, `prix_achat`, `prix_vente` (**integer cents**), `tva` (%), `stock` |
 | `clients` | `nom`, `email`, `telephone`, `adresse`, `matricule_fiscale` |
-| `documents` | `type`, `numero`, `date`, `client_id`, `statut`, `total_ht/tva/ttc`, `paid_amount`, `discount_*` |
-| `document_lignes` | `document_id`, `article_id`, `designation`, `quantite`, `prix_unitaire`, `tva`, totals |
-| `payments` | `document_id`, `date`, `amount`, `method`, `note` |
+| `documents` | `type`, `numero`, `date`, `client_id`, `statut`, `total_ht/tva/ttc` (**integer cents**), `paid_amount` (**integer cents**), `discount_*` (% + flag) |
+| `document_lignes` | `document_id`, `article_id`, `designation`, `quantite`, `prix_unitaire` (**integer cents**), `tva` (%), totals (**integer cents**) |
+| `payments` | `document_id`, `date`, `amount` (**integer cents**), `method`, `note` |
 | `sequences` | `type`, `annee`, `compteur` — yearly counters |
-| `products` / `sales` | Legacy tables created by login bootstrap (`main.py:171`) — kept for backward compatibility |
+| `products` / `sales` | Legacy tables created by login bootstrap (`main.py:171`) — money columns also stored as integer cents |
 
 Schema is created/patched idempotently in `MainApp.init_db()` (`main_app.py:869`).
+
+**Money storage:** all monetary columns are stored as **integer cents** so totals never accumulate floating-point drift. Percentages (`tva`, `discount_value`) and `quantite` remain `REAL`. Line totals and discounts are rounded half-up to whole cents with `decimal.Decimal` (`money.py`). Existing databases are migrated once at startup: `migrate_money_to_cents()` converts any `REAL` monetary column to cents and records the new schema in `PRAGMA user_version = 1`. The migration is idempotent, skips columns already declared `INTEGER`, and runs again after a database restore.
 
 ---
 
@@ -298,6 +303,7 @@ python -m pytest tests/test_security.py -v
 | `test_security.py` | Hash format, salt uniqueness, correct/wrong password, malformed/empty, legacy plaintext migration |
 | `test_accounts.py` | Account creation/validation, case-insensitive uniqueness, lockout, inactive accounts, password policy/change, last-admin and self-delete guards |
 | `test_database.py` | Schema creation, idempotency, data preservation, `get_next_numero` prefixes / increments / year rollover, `peek_next_numero` preview without reservation, sequence reconciliation and duplicate-number protection |
+| `test_money.py` | Cents parsing / half-up rounding, money formatting, line totals and discounts, one-time migration and idempotency |
 | `test_db_path.py` | Absolute path, co-location with scripts |
 
 ---
