@@ -1,7 +1,6 @@
 import math
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 import tkinter as tk
@@ -19,6 +18,12 @@ from accounts import (
     ensure_account_schema,
     get_user_by_id,
     require_admin,
+)
+from database_maintenance import (
+    DatabaseMaintenanceError,
+    backup_database,
+    restore_database,
+    validate_database_file,
 )
 from main import DB_PATH, prompt_password_change, verify_password
 from i18n import get_language, set_language, t
@@ -916,6 +921,65 @@ class MainApp(ctk.CTkToplevel):
             conn.close()
         return True
 
+    def _confirm_admin_password(self):
+        """Re-authenticate the current admin before a destructive action."""
+        from tkinter import simpledialog
+
+        parent = getattr(self, "_admin_win", None)
+        try:
+            if parent is None or not parent.winfo_exists():
+                parent = self
+        except Exception:
+            parent = self
+
+        password = simpledialog.askstring(
+            t("admin.password_confirm_title"),
+            t("admin.password_confirm_prompt"),
+            show="*",
+            parent=parent,
+        )
+        if not password:
+            return False
+
+        conn = None
+        row = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            row = conn.execute(
+                "SELECT password FROM users WHERE id = ?",
+                (self.user.get("id"),),
+            ).fetchone()
+        except Exception:
+            row = None
+        finally:
+            if conn is not None:
+                conn.close()
+
+        stored = row[0] if row else None
+        if not stored or not verify_password(password, stored):
+            messagebox.showerror(
+                t("common.error"), t("admin.error_wrong_password")
+            )
+            return False
+        return True
+
+    def _return_to_login(self):
+        """Close the app and show the login window after a database swap."""
+        parent = getattr(self, "_parent", None)
+        try:
+            self.destroy()
+        finally:
+            if parent is not None:
+                try:
+                    parent.deiconify()
+                    parent.lift()
+                    try:
+                        parent.password_entry.delete(0, "end")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
     def open_change_password_dialog(self):
         if not self.user.get("id"):
             return
@@ -1340,33 +1404,8 @@ class MainApp(ctk.CTkToplevel):
                 )
 
                 def _wipe_confirm():
-                    # Ask for password first
-                    from tkinter import simpledialog
-                    password = simpledialog.askstring(
-                        t("admin.password_confirm_title"),
-                        t("admin.password_confirm_prompt"),
-                        show="*"
-                    )
-                    if not password:
+                    if not self._confirm_admin_password():
                         return
-
-                    try:
-                        conn = sqlite3.connect(self.db_path)
-                        cur = conn.cursor()
-                        cur.execute(
-                            "SELECT password FROM users WHERE id = ?",
-                            (self.user["id"],),
-                        )
-                        row = cur.fetchone()
-                        conn.close()
-                    except Exception:
-                        row = None
-
-                    stored = row[0] if row else None
-                    if not stored or not verify_password(password, stored):
-                        messagebox.showerror("Mot de passe incorrect", t("admin.error_wrong_password"))
-                        return
-                    
                     if not messagebox.askokcancel(
                         t("admin.button_wipe"),
                         t("admin.confirm_wipe_no_backup"),
@@ -1506,10 +1545,17 @@ class MainApp(ctk.CTkToplevel):
                 if not path:
                     return
                 try:
-                    shutil.copyfile(self.db_path, path)
-                    backup_path = path
-                except Exception as e:
-                    messagebox.showerror(t("admin.backup_title"), t("admin.backup_failed", error=str(e)))
+                    backup_path = backup_database(self.db_path, path)
+                except DatabaseMaintenanceError as exc:
+                    messagebox.showerror(
+                        t("admin.backup_title"), t(exc.key, **exc.kwargs)
+                    )
+                    return
+                except Exception as exc:
+                    messagebox.showerror(
+                        t("admin.backup_title"),
+                        t("admin.backup_failed", error=str(exc)),
+                    )
                     return
 
         try:
@@ -1589,10 +1635,19 @@ class MainApp(ctk.CTkToplevel):
             )
             if not path:
                 return
-            shutil.copyfile(self.db_path, path)
-            messagebox.showinfo(t("admin.backup_title"), f"Sauvegarde effectuée:\n{path}")
-        except Exception as e:
-            messagebox.showerror(t("admin.backup_title"), t("admin.backup_failed", error=str(e)))
+            backup_database(self.db_path, path)
+            messagebox.showinfo(
+                t("admin.backup_title"), t("admin.backup_done", path=path)
+            )
+        except DatabaseMaintenanceError as exc:
+            messagebox.showerror(
+                t("admin.backup_title"), t(exc.key, **exc.kwargs)
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                t("admin.backup_title"),
+                t("admin.backup_failed", error=str(exc)),
+            )
 
     def _admin_restore_db(self):
         if not self._require_admin():
@@ -1603,46 +1658,50 @@ class MainApp(ctk.CTkToplevel):
             )
             if not src:
                 return
+
+            # Validate the candidate before the user is asked to confirm a
+            # destructive operation. Invalid files never touch the live DB.
+            try:
+                validate_database_file(src)
+            except DatabaseMaintenanceError as exc:
+                messagebox.showerror(
+                    t("admin.restore_title"), t(exc.key, **exc.kwargs)
+                )
+                return
+
             if not messagebox.askokcancel(
                 t("admin.restore_title"),
                 t("admin.restore_warning"),
             ):
                 return
 
-            backup_path = None
-            choice = messagebox.askyesnocancel(
-                t("admin.restore_title"),
-                t("admin.restore_backup_question"),
-            )
-            if choice is None:
+            if not self._confirm_admin_password():
                 return
 
-            if choice is True:
-                path = filedialog.asksaveasfilename(
-                    defaultextension=".db",
-                    filetypes=[("SQLite DB", "*.db"), ("All files", "*.*")],
-                    initialfile=f"{os.path.basename(self.db_path)}.backup",
+            try:
+                backup_path = restore_database(self.db_path, src)
+            except DatabaseMaintenanceError as exc:
+                messagebox.showerror(
+                    t("admin.restore_title"), t(exc.key, **exc.kwargs)
                 )
-                if not path:
-                    return
-                try:
-                    shutil.copyfile(self.db_path, path)
-                    backup_path = path
-                except Exception as e:
-                    messagebox.showerror(
-                        t("admin.backup_title"), t("admin.backup_failed", error=str(e))
-                    )
-                    return
+                return
+            except Exception as exc:
+                messagebox.showerror(
+                    t("admin.restore_title"),
+                    t("admin.restore_failed", error=str(exc)),
+                )
+                return
 
-            shutil.copyfile(src, self.db_path)
-            msg = (
-                t("admin.restore_done")
-            )
+            msg = t("admin.restore_done")
             if backup_path:
-                msg += f"\nUne sauvegarde de la base précédente a été créée: {backup_path}"
+                msg += t("admin.restore_backup_created", path=backup_path)
             messagebox.showinfo(t("admin.restore_title"), msg)
-        except Exception as e:
-            messagebox.showerror(t("admin.restore_title"), t("admin.restore_failed", error=str(e)))
+            self._return_to_login()
+        except Exception as exc:
+            messagebox.showerror(
+                t("admin.restore_title"),
+                t("admin.restore_failed", error=str(exc)),
+            )
 
     def init_db(self):
         conn = sqlite3.connect(self.db_path)

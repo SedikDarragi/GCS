@@ -22,11 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Client list now shows all clients (including fully paid ones)
 - Improved sorting logic to handle "Payé" text
 - Enhanced zebra striping with payment status colors
+- Backups now use SQLite's backup API for a consistent snapshot (including WAL data)
+- Admin restore now validates the candidate database, creates an automatic safety backup, swaps the file atomically, and returns to the login screen
 
 ### Fixed
 - Removed the hardcoded `admin/admin123` bootstrap; first-run admin now gets a one-time random password
 - Session is no longer trusted for admin rights: role and active status are re-checked before admin actions
 - Last active administrator, self-deletion, and self-deactivation are now prevented
+- Restoring an invalid or incompatible database can no longer corrupt or replace the live database
+- A failed post-restore migration automatically puts the previous database back
 - Client list not updating after document creation
 - Client list not updating after document conversion
 - Client list not updating after document validation

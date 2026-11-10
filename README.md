@@ -113,6 +113,7 @@ No cloud, no subscription — your data stays in a local `commercial.db` SQLite 
 GCS/
 ├── main.py              # Login / registration UI and DB bootstrap
 ├── accounts.py          # Account model, password hashing, auth, lockout, admin guards
+├── database_maintenance.py # Safe database validation, backup, atomic restore and rollback
 ├── main_app.py          # Main application — UI, business logic, exports (~8100 lines)
 ├── requirements.txt     # Runtime dependencies
 ├── assets/
@@ -121,6 +122,7 @@ GCS/
 │   ├── conftest.py      # headless customtkinter mock
 │   ├── test_security.py # hash / verify / salt tests
 │   ├── test_accounts.py # account model, lockout, roles, password policy
+│   ├── test_database_maintenance.py # safe backup / restore validation and atomic swap
 │   ├── test_database.py # schema, idempotency, sequences
 │   └── test_db_path.py  # DB path resolution
 ├── commercial.db        # Created on first run (gitignored)
@@ -272,7 +274,9 @@ Schema is created/patched idempotently in `MainApp.init_db()` (`main_app.py:869`
 *   New admin-created users and admin password resets require a password change at next login.
 *   The first administrator is seeded with a one-time random password (or `GCS_INITIAL_ADMIN_PASSWORD`); the published `admin123` default is no longer used.
 *   Legacy plaintext passwords are migrated on next successful login; existing installations that still use `admin123` are forced to change it.
-*   Destructive admin actions (wipe / restore) require password re-entry and offer a `.backup` copy.
+*   Destructive admin actions (wipe / restore) require password re-entry.
+*   **Admin restore is safe:** the chosen file is validated first (SQLite integrity check, GCS account schema, at least one active administrator), the current database is backed up automatically, the swap is atomic, and the previous database is put back if post-restore validation fails. A successful restore returns the app to the login screen.
+*   Database backups use SQLite's backup API, so WAL data is captured consistently instead of copying a live file byte-by-byte.
 *   `DB_PATH` is absolute — no accidental DB creation in a different working directory (`tests/test_db_path.py`).
 
 ---
