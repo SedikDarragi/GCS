@@ -174,6 +174,93 @@ def _safety_backup_path(db_path):
     return candidate
 
 
+def _copy_users(source_path, destination):
+    """Copy the ``users`` table from ``source_path`` into ``destination``.
+
+    Only the table and its rows are copied; the account indexes are recreated
+    by :func:`accounts.ensure_account_schema` afterwards.  Returns the number
+    of copied rows.
+    """
+    source = sqlite3.connect(source_path)
+    try:
+        row = source.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'users'"
+        ).fetchone()
+        if not row or not row[0]:
+            return 0
+        create_sql = row[0]
+        column_count = len(list(source.execute("PRAGMA table_info(users)")))
+        rows = source.execute("SELECT * FROM users").fetchall()
+    finally:
+        source.close()
+
+    if column_count <= 0:
+        return 0
+
+    destination.execute(create_sql)
+    placeholders = ", ".join("?" for _ in range(column_count))
+    destination.executemany(
+        f"INSERT INTO users VALUES ({placeholders})", rows
+    )
+    return len(rows)
+
+
+def reset_database(db_path, keep_users=True):
+    """Replace ``db_path`` with a fresh database, optionally keeping accounts.
+
+    Business data is discarded so every table except ``users`` starts empty.
+    Keeping the accounts is deliberate: the administrator who triggers the
+    wipe stays logged in and cannot be locked out of the application.
+
+    The new file is built next to the live database, validated, then swapped
+    in with :func:`os.replace`.  Stale ``-wal``/``-shm``/``-journal`` sidecars
+    are removed just before the swap so SQLite cannot replay old data into the
+    new file.  On any failure the live database is left untouched.
+
+    Returns the number of preserved user rows.
+    """
+    db_path = _absolute(db_path)
+    directory = os.path.dirname(db_path) or "."
+    os.makedirs(directory, exist_ok=True)
+
+    source_exists = os.path.isfile(db_path)
+    temporary = _temporary_file(directory, ".gcs-reset-")
+    preserved = 0
+    try:
+        destination = sqlite3.connect(temporary)
+        try:
+            if keep_users and source_exists:
+                preserved = _copy_users(db_path, destination)
+            ensure_account_schema(destination)
+            migrate_money_to_cents(destination)
+            destination.commit()
+        finally:
+            destination.close()
+
+        if keep_users and source_exists:
+            # Never complete a wipe that would leave the app without an
+            # active administrator.
+            validate_database_file(temporary)
+
+        _remove_sidecars(db_path)
+        os.replace(temporary, db_path)
+    except DatabaseMaintenanceError:
+        raise
+    except Exception as exc:
+        raise DatabaseMaintenanceError(
+            "admin.wipe_error_reinit", error=str(exc)
+        ) from exc
+    finally:
+        if os.path.exists(temporary):
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+
+    return preserved
+
+
 def backup_database(db_path, destination_path):
     """Write a consistent, complete copy of ``db_path`` to ``destination_path``."""
     db_path = _absolute(db_path)

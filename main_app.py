@@ -23,6 +23,7 @@ from accounts import (
 from database_maintenance import (
     DatabaseMaintenanceError,
     backup_database,
+    reset_database,
     restore_database,
     validate_database_file,
 )
@@ -1573,17 +1574,23 @@ class MainApp(ctk.CTkToplevel):
                     return
 
         try:
-            if os.path.exists(self.db_path):
-                os.remove(self.db_path)
+            preserved = reset_database(self.db_path)
+        except DatabaseMaintenanceError as exc:
+            messagebox.showerror(
+                t("admin.wipe_title"), t(exc.key, **exc.kwargs)
+            )
+            return
         except Exception as e:
-            messagebox.showerror(t("admin.wipe_title"), t("admin.wipe_error_delete", error=str(e)))
+            messagebox.showerror(
+                t("admin.wipe_title"), t("admin.wipe_error_reinit", error=str(e))
+            )
             return
 
         try:
             self.init_db()
         except Exception as e:
             messagebox.showerror(
-                "Effacer DB", t("admin.wipe_error_reinit", error=str(e))
+                t("admin.wipe_title"), t("admin.wipe_error_reinit", error=str(e))
             )
             return
 
@@ -1599,9 +1606,9 @@ class MainApp(ctk.CTkToplevel):
             except Exception:
                 pass
 
-            for t in ("devis", "bl", "factures", "reception"):
+            for doc_kind in ("devis", "bl", "factures", "reception"):
                 try:
-                    self.load_documents(t)
+                    self.load_documents(doc_kind)
                 except Exception:
                     pass
 
@@ -1631,12 +1638,14 @@ class MainApp(ctk.CTkToplevel):
             pass
 
         msg = t("admin.wipe_success")
+        if preserved:
+            msg += t("admin.wipe_users_kept")
         if backup_path:
-            msg += f" Une sauvegarde a été créée: {backup_path}"
+            msg += t("admin.wipe_backup_created", path=backup_path)
         else:
             msg += t("admin.wipe_no_backup")
 
-        messagebox.showinfo("Effacer DB", msg)
+        messagebox.showinfo(t("admin.wipe_title"), msg)
 
     def _admin_backup_db(self):
         if not self._require_admin():
