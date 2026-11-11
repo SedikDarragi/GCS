@@ -4978,9 +4978,9 @@ class MainApp(ctk.CTkToplevel):
             finally:
                 conn.close()
             self.load_paiements()
-            for t in ("devis", "bl", "factures"):
+            for doc_kind in ("devis", "bl", "factures"):
                 try:
-                    self.load_documents(t)
+                    self.load_documents(doc_kind)
                 except Exception:
                     pass
 
@@ -6631,9 +6631,9 @@ class MainApp(ctk.CTkToplevel):
             if not client_found:
                 self._refresh_documents_tree_for_client(preserved_client_id)
 
-        for t in ("devis", "bl", "factures"):
+        for doc_kind in ("devis", "bl", "factures"):
             try:
-                self.load_documents(t)
+                self.load_documents(doc_kind)
             except Exception:
                 pass
 
@@ -6692,9 +6692,9 @@ class MainApp(ctk.CTkToplevel):
             conn.close()
 
         self.load_paiements()
-        for t in ("devis", "bl", "factures"):
+        for doc_kind in ("devis", "bl", "factures"):
             try:
-                self.load_documents(t)
+                self.load_documents(doc_kind)
             except Exception:
                 pass
 
@@ -6782,9 +6782,9 @@ class MainApp(ctk.CTkToplevel):
                     except Exception:
                         pass
 
-            for t in ("devis", "bl", "factures"):
+            for doc_kind in ("devis", "bl", "factures"):
                 try:
-                    self.load_documents(t)
+                    self.load_documents(doc_kind)
                 except Exception:
                     pass
 
