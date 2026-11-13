@@ -368,6 +368,9 @@ TRANSLATIONS = {
         "export.html_print_button": "Print",
         "export.pdf_brand": "Business Management",
         "export.pdf_thank_you": "Thank you for your trust.",
+        "export.pdf_total_ht": "Total excl. VAT",
+        "export.pdf_total_tva": "Total VAT",
+        "export.pdf_total_ttc": "Total incl. VAT",
         "export.pdf_page": "Page {num}",
         # --- admin ---
         "admin.window_title": "Administration Settings",
@@ -854,6 +857,9 @@ TRANSLATIONS = {
         "export.html_print_button": "Imprimer",
         "export.pdf_brand": "Gestion Commerciale",
         "export.pdf_thank_you": "Merci pour votre confiance.",
+        "export.pdf_total_ht": "Total HT",
+        "export.pdf_total_tva": "Total TVA",
+        "export.pdf_total_ttc": "Total TTC",
         "export.pdf_page": "Page {num}",
         # --- admin ---
         "admin.window_title": "Paramètres d'administration",

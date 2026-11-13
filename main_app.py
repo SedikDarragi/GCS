@@ -7,7 +7,9 @@ import tkinter as tk
 import webbrowser
 from datetime import datetime
 from decimal import Decimal
+from html import escape as html_escape
 from tkinter import filedialog, messagebox, ttk
+from xml.sax.saxutils import escape as xml_escape
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -102,6 +104,15 @@ def _validate_percentage(raw):
     if value is None or value < 0 or value > 100:
         return None
     return value
+
+
+def _document_status_label(status):
+    """Return the localized label for a stored document status."""
+    key = {
+        "brouillon": "documents.status_draft",
+        "valide": "documents.status_validated",
+    }.get(status)
+    return t(key) if key else str(status or "")
 
 
 def _validate_line_inputs(qty_raw, pu_raw, tva_raw):
@@ -6829,7 +6840,9 @@ class MainApp(ctk.CTkToplevel):
             print(f"Warning: could not set modal grab for export dialog: {e}")
 
         ctk.CTkLabel(
-            dialog, text=f"Document #{document_id}", font=("Arial", 14, "bold")
+            dialog,
+            text=t("export.doc_heading", id=document_id),
+            font=("Arial", 14, "bold"),
         ).pack(pady=(20, 10))
 
         def export_html():
@@ -6841,7 +6854,9 @@ class MainApp(ctk.CTkToplevel):
             if not path:
                 return
             self.export_document_html(document_id, path)
-            messagebox.showinfo("Export", f"Export HTML terminÃ©:\n{path}")
+            messagebox.showinfo(
+                t("export.dialog_title"), t("export.success_html", path=path)
+            )
 
         def print_direct():
             tmp = os.path.join(tempfile.gettempdir(), f"document_{document_id}.html")
@@ -6854,7 +6869,7 @@ class MainApp(ctk.CTkToplevel):
         def export_pdf():
             if canvas is None or A4 is None:
                 messagebox.showerror(
-                    "PDF", "ReportLab n'est pas installÃ©. Installe les dÃ©pendances."
+                    t("export.dialog_title"), t("export.error_reportlab_missing")
                 )
                 return
             path = filedialog.asksaveasfilename(
@@ -6865,12 +6880,14 @@ class MainApp(ctk.CTkToplevel):
             if not path:
                 return
             self.export_document_pdf(document_id, path)
-            messagebox.showinfo("Export", f"Export PDF terminÃ©:\n{path}")
+            messagebox.showinfo(
+                t("export.dialog_title"), t("export.success_pdf", path=path)
+            )
 
         def print_pdf_windows():
             if canvas is None or A4 is None:
                 messagebox.showerror(
-                    "PDF", "ReportLab n'est pas installÃ©. Installe les dÃ©pendances."
+                    t("export.dialog_title"), t("export.error_reportlab_missing")
                 )
                 return
             tmp = os.path.join(tempfile.gettempdir(), f"document_{document_id}.pdf")
@@ -6899,7 +6916,7 @@ class MainApp(ctk.CTkToplevel):
     def show_new_doc_export_dialog(self, doc_id, doc_type):
         """Show export dialog after creating a new document."""
         dialog = ctk.CTkToplevel(self)
-        dialog.title("Document enregistrÃ©")
+        dialog.title(t("export.new_doc_title"))
         dialog.geometry("420x260")
         try:
             dialog.transient(self)
@@ -6908,7 +6925,9 @@ class MainApp(ctk.CTkToplevel):
             print(f"Warning: could not set modal grab for new doc export dialog: {e}")
 
         ctk.CTkLabel(
-            dialog, text=f"Document #{doc_id} enregistrÃ©", font=("Arial", 14, "bold")
+            dialog,
+            text=t("export.new_doc_heading", id=doc_id),
+            font=("Arial", 14, "bold"),
         ).pack(pady=(20, 10))
         
         ctk.CTkLabel(
@@ -6924,7 +6943,9 @@ class MainApp(ctk.CTkToplevel):
             if not path:
                 return
             self.export_document_html(doc_id, path)
-            messagebox.showinfo("Export", f"Export HTML terminÃ©:\n{path}")
+            messagebox.showinfo(
+                t("export.dialog_title"), t("export.success_html", path=path)
+            )
 
         def print_direct():
             tmp = os.path.join(tempfile.gettempdir(), f"document_{doc_id}.html")
@@ -6937,7 +6958,7 @@ class MainApp(ctk.CTkToplevel):
         def export_pdf():
             if canvas is None or A4 is None:
                 messagebox.showerror(
-                    "PDF", "ReportLab n'est pas installÃ©. Installe les dÃ©pendances."
+                    t("export.dialog_title"), t("export.error_reportlab_missing")
                 )
                 return
             path = filedialog.asksaveasfilename(
@@ -6948,12 +6969,14 @@ class MainApp(ctk.CTkToplevel):
             if not path:
                 return
             self.export_document_pdf(doc_id, path)
-            messagebox.showinfo("Export", f"Export PDF terminÃ©:\n{path}")
+            messagebox.showinfo(
+                t("export.dialog_title"), t("export.success_pdf", path=path)
+            )
 
         def print_pdf_windows():
             if canvas is None or A4 is None:
                 messagebox.showerror(
-                    "PDF", "ReportLab n'est pas installÃ©. Installe les dÃ©pendances."
+                    t("export.dialog_title"), t("export.error_reportlab_missing")
                 )
                 return
             tmp = os.path.join(tempfile.gettempdir(), f"document_{doc_id}.pdf")
@@ -7040,27 +7063,66 @@ class MainApp(ctk.CTkToplevel):
 
         # Determine if we should show reference column (only for devis)
         show_ref = doc_type == "devis"
-        
-        if show_ref:
-            rows_html = "".join(
-                f"<tr><td>{ref if ref else ''}</td><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{format_money(pu)}</td><td style='text-align:right'>{float(tva or 0):.1f}%</td><td style='text-align:right'>{format_money(ht)}</td><td style='text-align:right'>{format_money(ttc)}</td></tr>"
-                for (article_id, ref, d, q, pu, tva, ht, tv, ttc) in lines
-            )
-            colspan = "7"
-            ref_col = "<th>Référence</th>"
-        else:
-            rows_html = "".join(
-                f"<tr><td>{d}</td><td style='text-align:right'>{q}</td><td style='text-align:right'>{format_money(pu)}</td><td style='text-align:right'>{float(tva or 0):.1f}%</td><td style='text-align:right'>{format_money(ht)}</td><td style='text-align:right'>{format_money(ttc)}</td></tr>"
-                for (article_id, ref, d, q, pu, tva, ht, tv, ttc) in lines
-            )
-            colspan = "6"
-            ref_col = ""
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        status_label = _document_status_label(statut)
 
-        html = f"""<!doctype html>
-<html lang='fr'>
+        def line_cells(
+            article_id, ref, designation, quantity, unit_price, vat, ht, tv, ttc
+        ):
+            cells = []
+            if show_ref:
+                cells.append(f"<td>{html_escape(str(ref or ''))}</td>")
+            cells.extend(
+                [
+                    f"<td>{html_escape(str(designation or ''))}</td>",
+                    f"<td style='text-align:right'>{float(quantity or 0):.2f}</td>",
+                    f"<td style='text-align:right'>{format_money(unit_price)}</td>",
+                    f"<td style='text-align:right'>{float(vat or 0):.1f}%</td>",
+                    f"<td style='text-align:right'>{format_money(ht)}</td>",
+                    f"<td style='text-align:right'>{format_money(ttc)}</td>",
+                ]
+            )
+            return "<tr>" + "".join(cells) + "</tr>"
+
+        rows_html = "".join(line_cells(*line) for line in lines)
+        colspan = "7" if show_ref else "6"
+        if show_ref:
+            ref_col = f"<th>{html_escape(t('export.html_table_reference'))}</th>"
+        else:
+            ref_col = ""
+        empty_row = (
+            f"<tr><td colspan='{colspan}' style='text-align:center;color:#666'>"
+            f"{html_escape(t('export.html_no_lines'))}</td></tr>"
+        )
+
+        discount_html = ""
+        if discount_enabled and float(discount_value or 0) > 0:
+            discount_html = (
+                "<div class='total'>"
+                + t(
+                    "export.html_discount",
+                    pct=f"{float(discount_value):.1f}",
+                    amount=format_money(
+                        discount_cents(total_ht, discount_value)
+                    ),
+                )
+                + "</div>"
+            )
+
+        totals_html = (
+            f"<div class='total'>"
+            f"{t('export.html_totals_ht', value=format_money(total_ht))}</div>"
+            f"<div class='total'>"
+            f"{t('export.html_totals_tva', value=format_money(total_tva))}</div>"
+            f"<div class='total'>"
+            f"{t('export.html_totals_ttc', value=format_money(total_ttc))}</div>"
+        )
+
+        html_document = f"""<!doctype html>
+<html lang='{html_escape(get_language())}'>
 <head>
   <meta charset='utf-8'>
-  <title>{title} {numero}</title>
+  <title>{html_escape(str(title))} {html_escape(str(numero or ''))}</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 24px; }}
     .header {{ display:flex; justify-content:space-between; align-items:flex-start; }}
@@ -7078,18 +7140,18 @@ class MainApp(ctk.CTkToplevel):
 <body>
   <div class='header'>
     <div>
-      <h1 style='margin:0'>{title}</h1>
-      <div class='muted'>Numéro: <b>{numero}</b></div>
-      <div class='muted'>Date: {date_str}</div>
-      <div class='muted'>Statut: {statut}</div>
-      <div class='user-info'>Document généré par: <b>{self.user["username"]}</b> le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</div>
+      <h1 style='margin:0'>{html_escape(str(title))}</h1>
+      <div class='muted'>{t("export.html_label_number", number=html_escape(str(numero or '')))}</div>
+      <div class='muted'>{t("export.html_label_date", date=html_escape(str(date_str or '')))}</div>
+      <div class='muted'>{t("export.html_label_status", status=html_escape(status_label))}</div>
+      <div class='user-info'>{t("export.html_generated_by", username=html_escape(str(self.user["username"])), date=html_escape(generated_at))}</div>
     </div>
     <div class='box' style='min-width:320px'>
-      <div><b>Client</b> : {client_nom}</div>
-      <div class='muted'><b>Code TVA</b> : {client_matricule}</div>
-      <div class='muted'><b>Adresse</b> : {client_adresse}</div>
-      <div class='muted'><b>Telephone</b> : {client_tel}</div>
-      <div class='muted'><b>Email</b> : {client_email}</div>
+      <div><b>{html_escape(t("export.html_client_label"))}</b> : {html_escape(str(client_nom or ''))}</div>
+      <div class='muted'><b>{html_escape(t("export.html_vat_code"))}</b> : {html_escape(str(client_matricule or ''))}</div>
+      <div class='muted'><b>{html_escape(t("export.html_address"))}</b> : {html_escape(str(client_adresse or ''))}</div>
+      <div class='muted'><b>{html_escape(t("export.html_phone"))}</b> : {html_escape(str(client_tel or ''))}</div>
+      <div class='muted'><b>{html_escape(t("export.html_email"))}</b> : {html_escape(str(client_email or ''))}</div>
     </div>
   </div>
 
@@ -7097,38 +7159,32 @@ class MainApp(ctk.CTkToplevel):
     <thead>
       <tr>
         {ref_col}
-        <th>Désignation</th>
-        <th style='text-align:right'>Qté</th>
-        <th style='text-align:right'>PU</th>
-        <th style='text-align:right'>TVA%</th>
-        <th style='text-align:right'>HT</th>
-        <th style='text-align:right'>TTC</th>
+        <th>{html_escape(t("export.html_table_designation"))}</th>
+        <th style='text-align:right'>{html_escape(t("export.html_table_qty"))}</th>
+        <th style='text-align:right'>{html_escape(t("export.html_table_pu"))}</th>
+        <th style='text-align:right'>{html_escape(t("export.html_table_tva"))}</th>
+        <th style='text-align:right'>{html_escape(t("export.html_table_ht"))}</th>
+        <th style='text-align:right'>{html_escape(t("export.html_table_ttc"))}</th>
       </tr>
     </thead>
     <tbody>
-      {rows_html if rows_html else f"<tr><td colspan='{colspan}' style='text-align:center;color:#666'>Aucune ligne</td></tr>"}
+      {rows_html if rows_html else empty_row}
     </tbody>
   </table>
 
   <div style='display: flex; justify-content: space-between; margin-top: 16px; gap: 40px;'>
-    <div style='flex: 1;'>
-      {f"<div class='total'>Remise: {float(discount_value):.1f}% = -{format_money(discount_cents(total_ht, discount_value))}</div>" if discount_enabled and float(discount_value or 0) > 0 else ""}
-    </div>
-    <div style='flex: 1; text-align: right;'>
-      <div class='total'>HT: {format_money(total_ht)}</div>
-      <div class='total'>TVA: {format_money(total_tva)}</div>
-      <div class='total'>TTC: {format_money(total_ttc)}</div>
-    </div>
+    <div style='flex: 1;'>{discount_html}</div>
+    <div style='flex: 1; text-align: right;'>{totals_html}</div>
   </div>
 
   <div class='no-print' style='margin-top:16px'>
-    <button onclick='window.print()'>Imprimer</button>
+    <button onclick='window.print()'>{html_escape(t("export.html_print_button"))}</button>
   </div>
 </body>
 </html>"""
 
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write(html_document)
 
     def export_document_pdf(self, document_id, file_path):
         if (
@@ -7137,7 +7193,7 @@ class MainApp(ctk.CTkToplevel):
             or (Table is None)
             or (Paragraph is None)
         ):
-            raise RuntimeError("ReportLab non disponible")
+            raise RuntimeError(t("export.error_reportlab_missing"))
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -7197,6 +7253,8 @@ class MainApp(ctk.CTkToplevel):
             "factures": t("doc_type.factures"),
             "reception": t("nav.reception"),
         }.get(doc_type, doc_type)
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        status_label = _document_status_label(statut)
 
         doc = SimpleDocTemplate(
             file_path,
@@ -7240,22 +7298,48 @@ class MainApp(ctk.CTkToplevel):
 
         story.append(
             Paragraph(
-                t("app.title"),
+                t("export.pdf_brand"),
                 ParagraphStyle(name="Brand", parent=bold, fontSize=12, spaceAfter=2),
             )
         )
-        story.append(Paragraph(f"{title} <b>{numero}</b>", h1))
+        story.append(
+            Paragraph(
+                f"{xml_escape(str(title))} "
+                f"<b>{xml_escape(str(numero or ''))}</b>",
+                h1,
+            )
+        )
 
-        meta_left = f"<b>Date</b> : {date_str}<br/><b>Statut</b> : {statut}"
-        meta_right = f"<b>Client</b> : {client_nom or ''}"
+        meta_left = (
+            f"<b>{xml_escape(t('documents.col_date'))}</b> : "
+            f"{xml_escape(str(date_str or ''))}"
+            f"<br/><b>{xml_escape(t('documents.col_status'))}</b> : "
+            f"{xml_escape(status_label)}"
+        )
+        meta_right = (
+            f"<b>{xml_escape(t('doc_details.label_client'))}</b> : "
+            f"{xml_escape(str(client_nom or ''))}"
+        )
         if client_matricule:
-            meta_right += f"<br/><b>Code TVA</b> : {client_matricule}"
+            meta_right += (
+                f"<br/><b>{xml_escape(t('export.html_vat_code'))}</b> : "
+                f"{xml_escape(str(client_matricule))}"
+            )
         if client_adresse:
-            meta_right += f"<br/><b>Adresse</b> : {client_adresse}"
+            meta_right += (
+                f"<br/><b>{xml_escape(t('export.html_address'))}</b> : "
+                f"{xml_escape(str(client_adresse))}"
+            )
         if client_tel:
-            meta_right += f"<br/><b>Telephone</b> : {client_tel}"
+            meta_right += (
+                f"<br/><b>{xml_escape(t('export.html_phone'))}</b> : "
+                f"{xml_escape(str(client_tel))}"
+            )
         if client_email:
-            meta_right += f"<br/><b>Email</b> : {client_email}"
+            meta_right += (
+                f"<br/><b>{xml_escape(t('export.html_email'))}</b> : "
+                f"{xml_escape(str(client_email))}"
+            )
 
         meta_table = Table(
             [[Paragraph(meta_left, normal), Paragraph(meta_right, normal)]],
@@ -7279,7 +7363,11 @@ class MainApp(ctk.CTkToplevel):
 
         # Add user info
         user_info = Paragraph(
-            f"<b>Document généré par:</b> {self.user['username']} le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
+            t(
+                "export.html_generated_by",
+                username=xml_escape(str(self.user["username"])),
+                date=xml_escape(generated_at),
+            ),
             small,
         )
         story.append(Spacer(1, 6))
@@ -7331,13 +7419,13 @@ class MainApp(ctk.CTkToplevel):
         table_rows = [table_header]
 
         for article_id, ref, des, qty, pu, tva, tht, ttva, tttc in lines:
-            des_txt = str(des or "")
+            des_txt = xml_escape(str(des or "")).replace("\n", "<br/>")
             if show_ref:
-                ref_txt = str(ref or "")
+                ref_txt = xml_escape(str(ref or ""))
                 table_rows.append(
                     [
                         Paragraph(ref_txt, normal),
-                        Paragraph(des_txt.replace("\n", "<br/>") or "-", normal),
+                        Paragraph(des_txt or "-", normal),
                         Paragraph(f"{float(qty or 0):.2f}", normal),
                         Paragraph(format_money(pu), normal),
                         Paragraph(f"{float(tva or 0):.1f}%", normal),
@@ -7348,7 +7436,7 @@ class MainApp(ctk.CTkToplevel):
             else:
                 table_rows.append(
                     [
-                        Paragraph(des_txt.replace("\n", "<br/>") or "-", normal),
+                        Paragraph(des_txt or "-", normal),
                         Paragraph(f"{float(qty or 0):.2f}", normal),
                         Paragraph(format_money(pu), normal),
                         Paragraph(f"{float(tva or 0):.1f}%", normal),
@@ -7396,15 +7484,15 @@ class MainApp(ctk.CTkToplevel):
         # Create totals table (right side)
         totals_rows = [
             [
-                Paragraph("Total HT", bold),
+                Paragraph(t("export.pdf_total_ht"), bold),
                 Paragraph(format_money(total_ht), bold),
             ],
             [
-                Paragraph("Total TVA", bold),
+                Paragraph(t("export.pdf_total_tva"), bold),
                 Paragraph(format_money(total_tva), bold),
             ],
             [
-                Paragraph(t("client_dialog.col_ttc"), bold),
+                Paragraph(t("export.pdf_total_ttc"), bold),
                 Paragraph(format_money(total_ttc), bold),
             ],
         ]
@@ -7467,7 +7555,9 @@ class MainApp(ctk.CTkToplevel):
         def on_page(c, _doc):
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.HexColor("#6B7280"))
-            c.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {_doc.page}")
+            c.drawRightString(
+                A4[0] - 18 * mm, 10 * mm, t("export.pdf_page", num=_doc.page)
+            )
 
         doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
 

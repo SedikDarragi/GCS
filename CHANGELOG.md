@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admin restore now validates the candidate database, creates an automatic safety backup, swaps the file atomically, and returns to the login screen
 
 ### Fixed
+- HTML and PDF exports now escape customer and document content, closing an HTML-injection path and preventing ReportLab markup breakage
+- Export labels, status, totals and print/page text now follow the active EN/FR language, and the exported HTML declares the matching `lang` attribute
 - Removed the hardcoded `admin/admin123` bootstrap; first-run admin now gets a one-time random password
 - Session is no longer trusted for admin rights: role and active status are re-checked before admin actions
 - Last active administrator, self-deletion, and self-deactivation are now prevented
