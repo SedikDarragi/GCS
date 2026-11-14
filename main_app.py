@@ -990,21 +990,44 @@ class MainApp(ctk.CTkToplevel):
         return True
 
     def _return_to_login(self):
-        """Close the app and show the login window after a database swap."""
+        """Close the main window and bring back the existing login window."""
         parent = getattr(self, "_parent", None)
         try:
             self.destroy()
-        finally:
-            if parent is not None:
-                try:
-                    parent.deiconify()
-                    parent.lift()
-                    try:
-                        parent.password_entry.delete(0, "end")
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+        except Exception:
+            pass
+
+        if parent is None:
+            return
+        try:
+            if not parent.winfo_exists():
+                return
+        except Exception:
+            return
+
+        try:
+            parent.deiconify()
+            parent.lift()
+        except Exception:
+            pass
+        try:
+            parent.password_entry.delete(0, "end")
+        except Exception:
+            pass
+
+        # Keep the login screen in sync with the language chosen in the app.
+        try:
+            apply_language = getattr(parent, "apply_language", None)
+            if callable(apply_language):
+                apply_language()
+        except Exception:
+            pass
+        try:
+            lang = "EN" if get_language() == "en" else "FR"
+            parent.lang_var.set(lang)
+            parent.lang_switch.set(lang)
+        except Exception:
+            pass
 
     def open_change_password_dialog(self):
         if not self.user.get("id"):
@@ -9374,12 +9397,8 @@ class MainApp(ctk.CTkToplevel):
             conn.close()
 
     def logout(self):
-        """Fermer l'application et revenir à l'écran de connexion"""
-        self.destroy()
-        from main import LoginWindow
-
-        login_window = LoginWindow()
-        login_window.mainloop()
+        """Close the main window and return to the existing login screen."""
+        self._return_to_login()
 
     def on_closing(self):
         """Gérer la fermeture de la fenêtre"""
