@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from accounts import ensure_account_schema
+from document_numbers import ensure_unique_document_numbers
 from money import migrate_money_to_cents
 
 REQUIRED_TABLES = ("users",)
@@ -353,6 +354,7 @@ def restore_database(db_path, source_path, create_backup=True):
         try:
             ensure_account_schema(conn)
             migrate_money_to_cents(conn)
+            ensure_unique_document_numbers(conn)
         finally:
             conn.close()
         validate_database_file(db_path)

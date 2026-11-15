@@ -29,6 +29,7 @@ from database_maintenance import (
     restore_database,
     validate_database_file,
 )
+from document_numbers import ensure_unique_document_numbers
 from main import DB_PATH, prompt_password_change, verify_password
 from i18n import get_language, set_language, t
 from money import (
@@ -1888,6 +1889,7 @@ class MainApp(ctk.CTkToplevel):
             # Convert legacy currency-unit amounts once.  Fresh databases
             # already use INTEGER columns and are left untouched.
             migrate_money_to_cents(conn)
+            ensure_unique_document_numbers(conn)
 
             conn.commit()
         finally:
