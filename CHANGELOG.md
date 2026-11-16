@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Test suite tracked in the repository and run automatically on push and pull requests via GitHub Actions
 - Centralised, testable account model (`accounts.py`)
 - Shared money helpers (`money.py`) for parsing, half-up rounding, formatting and migration
 - Integer-cent storage for all monetary columns, with `decimal.Decimal` used for fractional calculations and display
