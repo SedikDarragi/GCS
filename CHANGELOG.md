@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation (README, SETUP, CONTRIBUTING)
 
 ### Changed
+- Runtime dependencies are pinned to known-good versions in `requirements.txt`; `requirements-dev.txt` adds the pinned test runner
 - Client list now shows all clients (including fully paid ones)
 - Document totals, line totals, discounts, payments, client balances and exports now calculate in integer cents and round half-up to the nearest cent
 - Legacy `products.price` and `sales.total_price` values are migrated to integer cents as well
