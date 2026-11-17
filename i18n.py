@@ -461,6 +461,8 @@ TRANSLATIONS = {
         "about.title": "GCS",
         "about.version": "Version: 0.1.0 beta",
         "about.version_mainapp": "Version: 0.1.22 beta",
+        "about.open_logs": "Open log file",
+        "about.logs_open_failed": "Could not open the log file.",
         "about.fallback_body": "GCS\nVersion: 0.1.0 beta\nContact: sedikdarragi@gmail.com",
         # --- validation ---
         "validation.fill_all_fields": "Please fill in all fields",
@@ -950,6 +952,8 @@ TRANSLATIONS = {
         "about.title": "GCS",
         "about.version": "Version: 0.1.0 beta",
         "about.version_mainapp": "Version: 0.1.22 beta",
+        "about.open_logs": "Ouvrir le journal",
+        "about.logs_open_failed": "Impossible d'ouvrir le journal.",
         "about.fallback_body": "GCS\nVersion: 0.1.0 beta\nContact: sedikdarragi@gmail.com",
         # --- validation ---
         "validation.fill_all_fields": "Veuillez remplir tous les champs",

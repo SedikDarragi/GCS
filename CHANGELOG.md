@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Rotating file logging (`app_logging.py`) replaces console `print()` diagnostics; logs go to `logs/gcs.log` (2 MB x 5 backups, overridable with `GCS_LOG_DIR`) and can be opened from the About dialogs in both EN and FR
 - Test suite tracked in the repository and run automatically on push and pull requests via GitHub Actions
 - Centralised, testable account model (`accounts.py`)
 - Shared money helpers (`money.py`) for parsing, half-up rounding, formatting and migration

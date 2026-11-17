@@ -19,11 +19,14 @@ from accounts import (
     validate_password,
     verify_password,
 )
+from app_logging import configure_logging, get_logger, open_log_file
 from i18n import get_language, set_language, t
 
 DB_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "commercial.db"
 )
+
+logger = get_logger()
 
 
 def prompt_password_change(parent, user_id, db_path, force=False):
@@ -165,12 +168,12 @@ class LoginWindow(ctk.CTk):
                 )
                 self.logo_label = ctk.CTkLabel(self, image=self.logo_image, text="")
             except Exception as e:
-                print(f"Error loading logo: {e}")
+                logger.warning("Error loading logo: %s", e)
                 self.logo_label = ctk.CTkLabel(
                     self, text="LOGO", font=("Arial", 24, "bold")
                 )
         else:
-            print(f"Logo not found at {logo_path}")
+            logger.info("Logo not found at %s", logo_path)
             self.logo_label = ctk.CTkLabel(
                 self, text="LOGO", font=("Arial", 24, "bold")
             )
@@ -331,7 +334,7 @@ class LoginWindow(ctk.CTk):
             username=username,
             password=password,
         )
-        print(message)
+        logger.info("Default administrator created for %s", username)
         try:
             messagebox.showinfo(t("login.default_admin_title"), message)
         except Exception:
@@ -353,7 +356,7 @@ class LoginWindow(ctk.CTk):
             messagebox.showerror(
                 t("common.error"), t("login.error_generic", error=str(e))
             )
-            print(f"Login error: {str(e)}")
+            logger.error("Login error: %s", e)
             return
         finally:
             if conn is not None:
@@ -395,7 +398,7 @@ class LoginWindow(ctk.CTk):
         except Exception:
             pass
 
-        print(f"User logged in: {user['username']}")
+        logger.info("User logged in: %s", user["username"])
         self.withdraw()
 
         from main_app import MainApp
@@ -430,6 +433,11 @@ class LoginWindow(ctk.CTk):
             gh_lbl.pack(pady=(2, 8))
             gh_lbl.bind("<Button-1>", lambda e: webbrowser.open("https://github.com/SedikDarragi"))
 
+            def open_logs():
+                if not open_log_file():
+                    messagebox.showerror(t("common.error"), t("about.logs_open_failed"))
+
+            ctk.CTkButton(dialog, text=t("about.open_logs"), command=open_logs).pack(pady=(4, 0))
             ctk.CTkButton(dialog, text=t("common.close"), command=dialog.destroy, fg_color="gray", hover_color="darkgray").pack(pady=8)
         except Exception:
             messagebox.showinfo(t("about.dialog_title"), t("about.fallback_body"))
@@ -633,5 +641,7 @@ class RegisterWindow(ctk.CTkToplevel):
 
 
 if __name__ == "__main__":
+    configure_logging()
+    logger.info("Starting GCS")
     app = LoginWindow()
     app.mainloop()

@@ -29,6 +29,7 @@ from database_maintenance import (
     restore_database,
     validate_database_file,
 )
+from app_logging import get_logger, open_log_file
 from document_numbers import ensure_unique_document_numbers
 from main import DB_PATH, prompt_password_change, verify_password
 from i18n import get_language, set_language, t
@@ -67,6 +68,8 @@ except Exception:
     TableStyle = None
     Paragraph = None
     Spacer = None
+
+logger = get_logger()
 
 
 def _parse_finite_number(raw):
@@ -480,8 +483,8 @@ class MainApp(ctk.CTkToplevel):
                         self.sidebar, image=self.logo_image, text=""
                     )
                 except Exception as e:
-                    print(
-                        f"CTkImage creation failed: {e}; falling back to tk.PhotoImage"
+                    logger.warning(
+                        "CTkImage creation failed: %s; falling back to tk.PhotoImage", e
                     )
                     try:
                         self._logo_tk = ImageTk.PhotoImage(pil_resized, master=self)
@@ -491,16 +494,16 @@ class MainApp(ctk.CTkToplevel):
                             self.sidebar, image=self._logo_tk, bd=0
                         )
                     except Exception as e2:
-                        print(f"Fallback PhotoImage failed: {e2}")
+                        logger.warning("Fallback PhotoImage failed: %s", e2)
 
                         self.logo_label = ctk.CTkLabel(
                             self.sidebar, text="LOGO", font=("Arial", 16, "bold")
                         )
             else:
-                print(f"Sidebar logo not found at {logo_path}")
+                logger.info("Sidebar logo not found at %s", logo_path)
                 raise FileNotFoundError("Logo file missing")
         except Exception as e:
-            print(f"Error loading sidebar logo: {e}")
+            logger.warning("Error loading sidebar logo: %s", e)
             self.logo_label = ctk.CTkLabel(
                 self.sidebar, text="LOGO", font=("Arial", 16, "bold")
             )
@@ -525,7 +528,7 @@ class MainApp(ctk.CTkToplevel):
                 )
                 self.lang_switch.pack(side="right", padx=4)
         except Exception as e:
-            print(f"Language switcher init failed: {e}")
+            logger.warning("Language switcher init failed: %s", e)
 
         self.menu_label = ctk.CTkLabel(
             self.sidebar, text=t("sidebar.menu_heading"), font=self.ui["font_h2"]
@@ -1266,7 +1269,7 @@ class MainApp(ctk.CTkToplevel):
                 admin_win.transient(self)
                 admin_win.grab_set()
             except Exception as e:
-                print(f"Warning: could not set modal grab for admin window: {e}")
+                logger.warning("Could not set modal grab for admin window: %s", e)
 
             def _on_admin_close():
                 try:
@@ -1364,7 +1367,7 @@ class MainApp(ctk.CTkToplevel):
                                 ),
                             )
                     except Exception as e:
-                        print(f"Failed to load users for admin panel: {e}")
+                        logger.warning("Failed to load users for admin panel: %s", e)
                     finally:
                         if conn is not None:
                             conn.close()
@@ -1511,7 +1514,7 @@ class MainApp(ctk.CTkToplevel):
                 hover_color="darkgray",
             ).pack(side="right")
         except Exception as e:
-            print(f"Failed to open admin settings: {e}")
+            logger.error("Failed to open admin settings: %s", e)
 
     def open_about_dialog(self):
         try:
@@ -1522,7 +1525,7 @@ class MainApp(ctk.CTkToplevel):
                 dialog.transient(self)
                 dialog.grab_set()
             except Exception as e:
-                print(f"Warning: could not set modal grab for about dialog: {e}")
+                logger.warning("Could not set modal grab for about dialog: %s", e)
 
             ctk.CTkLabel(dialog, text="GCS", font=("Arial", 18, "bold")).pack(
                 pady=(16, 4)
@@ -1556,6 +1559,15 @@ class MainApp(ctk.CTkToplevel):
                 lambda e: webbrowser.open("https://github.com/SedikDarragi"),
             )
 
+            def open_logs():
+                if not open_log_file():
+                    messagebox.showerror(
+                        t("common.error"), t("about.logs_open_failed")
+                    )
+
+            ctk.CTkButton(
+                dialog, text=t("about.open_logs"), command=open_logs
+            ).pack(pady=(4, 0))
             ctk.CTkButton(
                 dialog,
                 text=t("common.close"),
@@ -2766,7 +2778,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for article dialog: {e}")
+            logger.warning("Could not set modal grab for article dialog: %s", e)
 
         ref_value = ""
         des_value = ""
@@ -3526,7 +3538,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for new document dialog: {e}")
+            logger.warning("Could not set modal grab for new document dialog: %s", e)
 
         top = ctk.CTkFrame(dialog, fg_color="transparent")
         top.pack(fill="x", padx=20, pady=15)
@@ -3632,7 +3644,7 @@ class MainApp(ctk.CTkToplevel):
                 dlg.transient(dialog)
                 dlg.grab_set()
             except Exception as e:
-                print(f"Warning: could not set modal grab for add line dialog: {e}")
+                logger.warning("Could not set modal grab for add line dialog: %s", e)
 
             header = ctk.CTkFrame(dlg, fg_color="transparent")
             header.pack(fill="x", padx=20, pady=(15, 10))
@@ -3959,7 +3971,7 @@ class MainApp(ctk.CTkToplevel):
                 dlg.transient(dialog)
                 dlg.grab_set()
             except Exception as e:
-                print(f"Warning: could not set modal grab for edit line dialog: {e}")
+                logger.warning("Could not set modal grab for edit line dialog: %s", e)
 
             header = ctk.CTkFrame(dlg, fg_color="transparent")
             header.pack(fill="x", padx=20, pady=(15, 10))
@@ -4642,7 +4654,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for document details dialog: {e}")
+            logger.warning("Could not set modal grab for document details dialog: %s", e)
 
         is_locked = statut == "valide"
 
@@ -5031,7 +5043,7 @@ class MainApp(ctk.CTkToplevel):
                 dlg.transient(dialog)
                 dlg.grab_set()
             except Exception as e:
-                print(f"Warning: could not set modal grab for line editor dialog: {e}")
+                logger.warning("Could not set modal grab for line editor dialog: %s", e)
 
             header = ctk.CTkFrame(dlg, fg_color="transparent")
             header.pack(fill="x", padx=20, pady=(15, 10))
@@ -6768,7 +6780,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for payment dialog: {e}")
+            logger.warning("Could not set modal grab for payment dialog: %s", e)
 
         ctk.CTkLabel(
             dialog, text=f"Document ID: {document_id}", font=("Arial", 14, "bold")
@@ -6862,7 +6874,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for export dialog: {e}")
+            logger.warning("Could not set modal grab for export dialog: %s", e)
 
         ctk.CTkLabel(
             dialog,
@@ -6947,7 +6959,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for new doc export dialog: {e}")
+            logger.warning("Could not set modal grab for new doc export dialog: %s", e)
 
         ctk.CTkLabel(
             dialog,
@@ -7911,7 +7923,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for add product dialog: {e}")
+            logger.warning("Could not set modal grab for add product dialog: %s", e)
 
         def save_product():
             name = name_entry.get()
@@ -8231,7 +8243,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for new sale dialog: {e}")
+            logger.warning("Could not set modal grab for new sale dialog: %s", e)
 
         label = ctk.CTkLabel(dialog, text="Formulaire de nouvelle vente")
         label.pack(pady=20)
@@ -8273,8 +8285,8 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(
-                f"Warning: could not set modal grab for modify product dialog (small): {e}"
+            logger.warning(
+                "Could not set modal grab for modify product dialog (small): %s", e
             )
 
         dialog = ctk.CTkToplevel(self)
@@ -8284,8 +8296,8 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(
-                f"Warning: could not set modal grab for modify product dialog (large): {e}"
+            logger.warning(
+                "Could not set modal grab for modify product dialog (large): %s", e
             )
 
         header = ctk.CTkFrame(dialog, fg_color="transparent")
@@ -8765,7 +8777,7 @@ class MainApp(ctk.CTkToplevel):
             dialog.transient(self)
             dialog.grab_set()
         except Exception as e:
-            print(f"Warning: could not set modal grab for client dialog: {e}")
+            logger.warning("Could not set modal grab for client dialog: %s", e)
 
         nom_value = ""
         email_value = ""
